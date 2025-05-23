@@ -30,11 +30,6 @@ typedef struct {
 
 CircularList cl;
 
-void setConsoleColor(WORD color) {
-	HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-	SetConsoleTextAttribute(hConsole, color);
-}
-
 void initialize_circular_list(CircularList *circular_list) {
 	circular_list->head = 0;
 	circular_list->tail = 0;
