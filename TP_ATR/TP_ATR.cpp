@@ -19,11 +19,15 @@ typedef struct {
 	int type;
 } Message;
 
+typedef struct Node {
+	Message data;
+	struct Node *next;
+} Node;
+
 typedef struct {
-	Message m[MAX_MSG];
-	int head;
-	int tail;
-	int count;
+	Node* begin;
+	Node* end;
+	int tam;
 	HANDLE hMutex;
 	HANDLE isNotFull;	
 } CircularList;
@@ -31,43 +35,68 @@ typedef struct {
 CircularList cl;
 
 void initialize_circular_list(CircularList *circular_list) {
-	circular_list->head = 0;
-	circular_list->tail = 0;
-	circular_list->count = 0;
+	circular_list->begin = NULL;
+	circular_list->end = NULL;
+	circular_list->tam= 0;
 	circular_list->hMutex = CreateMutex(NULL, FALSE, NULL);
 	circular_list->isNotFull = CreateEvent(NULL, TRUE, TRUE, NULL); // Inicializa o evento como sinalizado
 }
 
-void display_circular_list(CircularList *circular_list) {
+void print_circular_list(CircularList *circular_list) {
 	/*
 	* Exibe o conteúdo da lista circular.
 	*/
 	WaitForSingleObject(circular_list->hMutex, INFINITE);
 
-	printf("\nTamanho da lista circular: %d\n", circular_list->count);
-	printf("Conteudo da lista circular:\n");
-	for (int i = 0; i < circular_list->count; i++) {
-		//int index = (circular_list->tail + i) % 200;
-		printf("[%d] %s\n", i, circular_list->m[i].content);
+	printf("\nTamanho da lista circular: %d\n", circular_list->tam);
+
+	Node* node = circular_list->begin;
+	if(node == NULL)
+		printf("Lista circular vazia.\n");
+
+	else {
+		int i = 0;
+		do {
+			printf("[%02d]: Mensagem: %s\n", i++, node->data.content);
+			node = node->next;
+
+		} while (node != circular_list->begin);
 	}
 
 	ReleaseMutex(circular_list->hMutex);
 }
 
-void deposit_messages(CircularList *circular_list, Message msg) {
+void deposit_messages(CircularList* circular_list, Message msg) {
 	/*
-	* Deposita mensagens na lista circular.
+	* Deposita mensagens no fim da lista circular.
 	*/
 	WaitForSingleObject(circular_list->isNotFull, INFINITE); // Espera até que a lista não esteja cheia
 	WaitForSingleObject(circular_list->hMutex, INFINITE);
 
-	circular_list->m[circular_list->head] = msg;
-	circular_list->head = (circular_list->head + 1) % 200;
-	circular_list->count++;
+	Node* newNode = (Node*)malloc(sizeof(Node));
 
-	if (circular_list->count == MAX_MSG - 1) {
-		SetEvent(circular_list->isNotFull); // Sinaliza que a lista está cheia
-		printf("Lista cheia! \n");
+	if (newNode) {
+		newNode->data = msg;
+
+		// Lista vazia
+		if (circular_list->begin == NULL) {
+			circular_list->begin = newNode; // O nó inicial aponta para o novo nó
+			circular_list->end = newNode; // O nó final também aponta para o novo nó
+			circular_list->end->next = circular_list->begin; // Faz o nó apontar para o início
+		}
+		else {
+			circular_list->end->next = newNode; // O ultimo nó aponta para o novo nó
+			circular_list->end = newNode; // O novo nó se torna o último nó
+			newNode->next = circular_list->begin; // Faz o novo nó apontar para o início
+		}
+		circular_list->tam++;
+	}
+	else
+		printf("Erro ao alocar memoria para o novo nó.\n");
+
+	if (circular_list->tam == MAX_MSG) {
+		printf("Lista circular cheia. Limite de 200 mensagens atingido. \n");
+		ResetEvent(circular_list->isNotFull); // Sinaliza que a lista está cheia
 	}
 
 	ReleaseMutex(circular_list->hMutex);
@@ -171,9 +200,7 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 				st.wMilliseconds);
 
 			printf("Hotbox message: %s\n", msg.content);
-			if (cl.count < MAX_MSG) {
-				deposit_messages(&cl, msg); // Deposita a mensagem na lista circular
-			}
+			deposit_messages(&cl, msg); // Deposita a mensagem na lista circular
 		}
 
 	}
@@ -238,9 +265,7 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 				st.wMilliseconds);
 
 			printf("Remote message: %s\n", msg.content);
-			if (cl.count < MAX_MSG) {
-				deposit_messages(&cl, msg); // Deposita a mensagem na lista circular
-			}
+			deposit_messages(&cl, msg); // Deposita a mensagem na lista circular
 		}
 	}
 	CloseHandle(hEvent);
@@ -285,7 +310,7 @@ int main() {
 		WaitForSingleObject(keyboardThread, INFINITE);
 	}
 
-	display_circular_list(&cl); // Exibe o conteúdo da lista circular
+	print_circular_list(&cl); // Exibe o conteúdo da lista circular
 
 	GetExitCodeThread(hotboxThread, &dwExitCode);
 	CloseHandle(hotboxThread);
