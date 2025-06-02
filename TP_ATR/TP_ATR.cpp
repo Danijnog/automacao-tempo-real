@@ -1,3 +1,4 @@
+#define WIN32_LEAN_AND_MEAN
 #include <iostream>
 #include <time.h>
 #include <iomanip>
@@ -5,54 +6,92 @@
 #include <string>
 #include <windows.h>
 #include <conio.h>
+#include <process.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <vector>
 
-#define MAX_MSG 200
+
+#define CAP_BUFF 200         // capacidade do buffer circular, 200 mensagens
 
 // Variável global para NSEQ do hotbox e da remota
 static LONG nseq_counter_hotbox = 0;
 static LONG nseq_counter_remote = 0;
 
-HANDLE hPauseEvent; // Handle para controle de pausa/continuação
-
-typedef struct {
-	char content[100]; // Conteúdo da mensagem
-	int type;
-} Message;
-
 typedef struct Node {
-	Message data;
-	struct Node *next;
+	std::string       msg;       // Conteudo da mensagem
+	struct Node*     next = NULL;      // Ponteiro para o proximo nó da lista circular
 } Node;
 
-typedef struct {
-	Node* begin;
-	Node* end;
-	int tam;
-	HANDLE hMutex;
-	HANDLE isNotFull;	
-} CircularList;
+CRITICAL_SECTION cs_list;  // protege lista e free_list
+Node  pool[CAP_BUFF];      // bloco de nós pré-alocado
+Node* free_list = NULL;    // nós livres
+Node* head = NULL;         // Último elemento da lista circular (head->next é o 1.º e tb o 1° que deve ser consumido)
 
-CircularList cl;
+HANDLE sem_tipo[2];        // um semáforo por tipo de mensagem para indicar que há mensagem do respectivo tipo
+HANDLE sem_space;          // conta nós livres no buffer (0–200)
 
-void initialize_circular_list(CircularList *circular_list) {
-	circular_list->begin = NULL;
-	circular_list->end = NULL;
-	circular_list->tam= 0;
-	circular_list->hMutex = CreateMutex(NULL, FALSE, NULL);
-	circular_list->isNotFull = CreateEvent(NULL, TRUE, TRUE, NULL); // Inicializa o evento como sinalizado
+
+HANDLE hPauseEvent; // Handle para controle de pausa/continuação
+
+
+
+// Inicialização da lista
+static void initialize_circular_list(void)
+{
+	// Todos os 200 nós começam na free_list 
+	for (int i = 0; i < CAP_BUFF; ++i) {
+		pool[i].next = free_list;
+		free_list = &pool[i];
+	}
 }
 
-void print_circular_list(CircularList *circular_list) {
-	/*
-	* Exibe o conteúdo da lista circular.
-	*/
+// Funções utilitarias 
+
+static Node* alloc_node(void)
+{
+	// Remove nó da free_list  
+	Node* n;
+	EnterCriticalSection(&cs_list);
+	n = free_list;
+	free_list = free_list->next;
+	LeaveCriticalSection(&cs_list);
+	return n;                   
+}
+
+static void recycle_node(Node* n)
+{
+	// Devolve nó à free_list para reutilização futura 
+	EnterCriticalSection(&cs_list);
+	n->next = free_list;
+	free_list = n;
+	LeaveCriticalSection(&cs_list);
+}
+
+static void msgToVector(Node* n, std::vector<std::string>& msgVector) {  // Transforma a mensagem em um vetor de strings
+	std::stringstream mensagem(n->msg);
+	std::string campo;
+	while (std::getline(mensagem, campo, ';')) {
+		msgVector.push_back(campo);
+	}
+}
+
+
+/*
+static void print_circular_list(CircularList *circular_list) 
+{
+	
+	// Exibe o conteúdo da lista circular.
+	
 	WaitForSingleObject(circular_list->hMutex, INFINITE);
 
 	printf("\nTamanho da lista circular: %d\n", circular_list->tam);
 
 	Node* node = circular_list->begin;
-	if(node == NULL)
+	if (node == NULL) {
 		printf("Lista circular vazia.\n");
+	}
 
 	else {
 		int i = 0;
@@ -65,62 +104,50 @@ void print_circular_list(CircularList *circular_list) {
 
 	ReleaseMutex(circular_list->hMutex);
 }
+*/
+static void deposit_messages(std::string Mensagem, int tipo) {
+	
+	// Aloca a mensagem em um nó livre
+	Node* n = alloc_node();             // obtém slot livre
+	n->msg = Mensagem;
 
-void deposit_messages(CircularList* circular_list, Message msg) {
-	/*
-	* Deposita mensagens no fim da lista circular.
-	*/
-	WaitForSingleObject(circular_list->isNotFull, INFINITE); // Espera até que a lista não esteja cheia
-	WaitForSingleObject(circular_list->hMutex, INFINITE);
-
-	Node* newNode = (Node*)malloc(sizeof(Node));
-
-	if (newNode) {
-		newNode->data = msg;
-
-		// Lista vazia
-		if (circular_list->begin == NULL) {
-			circular_list->begin = newNode; // O nó inicial aponta para o novo nó
-			circular_list->end = newNode; // O nó final também aponta para o novo nó
-			circular_list->end->next = circular_list->begin; // Faz o nó apontar para o início
-		}
-		else {
-			circular_list->end->next = newNode; // O ultimo nó aponta para o novo nó
-			circular_list->end = newNode; // O novo nó se torna o último nó
-			newNode->next = circular_list->begin; // Faz o novo nó apontar para o início
-		}
-		circular_list->tam++;
+	// Insere o nó com a mensagem no fim da lista circular                   
+	//  head aponta SEMPRE para o primeiro nó (o nó mais velho)   
+	EnterCriticalSection(&cs_list);
+	if (!head) {                         // Se lista vazia   
+		head = n;
+		n->next = n;                     // Nó único aponta para si
 	}
-	else
-		printf("Erro ao alocar memoria para o novo nó.\n");
-
-	if (circular_list->tam == MAX_MSG) {
-		printf("Lista circular cheia. Limite de 200 mensagens atingido. \n");
-		ResetEvent(circular_list->isNotFull); // Sinaliza que a lista está cheia
+	else {
+		n->next = head->next;          // insere após head
+		head->next = n;
+		head = n;                  // n vira a nova head
 	}
+	LeaveCriticalSection(&cs_list);
 
-	ReleaseMutex(circular_list->hMutex);
+	// Sinaliza disponibilidade à thread que tem interesse nessa mensagem 
+	ReleaseSemaphore(sem_tipo[tipo], 1, NULL);
+	
 }
 
-void generate_random_id(char *buffer, size_t size) {
+
+std::string generate_random_id() {
 	/*
 	* Função para gerar um ID aleatório no formato XXX-XXXX, onde XXX são letras maiúsculas e XXXX são dígitos.
 	*/
-	
+
 	// Gerar 3 letras maiúsculas aleatórias
-	char letters[4];
+	std::ostringstream id;
 	for (int i = 0; i < 3; i++) {
-
-
-		letters[i] = 'A' + (rand() % 26);
+		id << static_cast<char>('A' + (rand() % 26));
 	}
-	letters[3] = '\0';
+	id << "-";
 
-	// Gerar 4 dígitos aleatórios
-	int numbers = rand() % 10000;
+	// Gerar e adicionar 4 dígitos aleatórios
+	id << std::setw(4) << std::setfill('0') << (rand() % 10000);
 
-	// Formatar no buffer fornecido
-	snprintf(buffer, size, "%s-%04d", letters, numbers);
+	return id.str();
+
 }
 
 DWORD WINAPI keyboard_control_thread(LPVOID) {
@@ -163,11 +190,16 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 	HANDLE hEvent;
 	DWORD status;
 	hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-	Message msg;
+	std::string msg;
+	std::ostringstream mensagem;
 
 	while (true) {
+		                                                                 //ERRO: mesclar os waitforsingle object num waitformultopleobjects
+		                                                                 // com temporizador em vez de 500 de espera
 		status = WaitForSingleObject(hEvent, 500); // Aguarda o timeout de 500ms para gerar a próxima mensagem
-		
+		// Espera espaço livre no buffer — bloqueia se sem_space == 0.                 
+		WaitForSingleObject(sem_space, INFINITE);
+
 		WaitForSingleObject(hPauseEvent, INFINITE); // Espera até que o evento seja sinalizado (executando)
 		if (status == WAIT_TIMEOUT) {
 			// NSEQ
@@ -175,11 +207,11 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 
 			// Tipo
 			// int tipo = 99; // Tipo de mensagem (99)
-			msg.type = 99;
+			int msg_type = 99;
 
 			// ID
-			char id[9];
-			generate_random_id(id, sizeof(id));
+			std::string id = generate_random_id();
+			
 
 			// Estado
 			int estado = rand() % 2; // Estado (0 = Normal, 1 = Roda quente)
@@ -188,19 +220,24 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 			SYSTEMTIME st;
 			GetLocalTime(&st); // Obtém a hora local do sistema
 
-			snprintf(msg.content, sizeof(msg),
-				"%07d;%02d;%s;%d;%02d:%02d:%02d:%03d",
-				nseq,
-				msg.type,
-				id,
-				estado,
-				st.wHour,
-				st.wMinute,
-				st.wSecond,
-				st.wMilliseconds);
+			//printf("DEBUG: ID gerado: [%s]\n", id.c_str());
 
-			printf("Hotbox message: %s\n", msg.content);
-			deposit_messages(&cl, msg); // Deposita a mensagem na lista circular
+			mensagem << std::setw(7) << std::setfill('0') << nseq << ";"
+				<< std::setw(2) << std::setfill('0') << msg_type << ";"
+				<< id << ";"
+				<< estado << ";"
+				<< std::setw(2) << std::setfill('0') << st.wHour << ":"
+				<< std::setw(2) << std::setfill('0') << st.wMinute << ":"
+				<< std::setw(2) << std::setfill('0') << st.wSecond << ":"
+				<< std::setw(3) << std::setfill('0') << st.wMilliseconds;
+
+			msg = mensagem.str();
+
+			mensagem.str("");  // limpa o conteúdo
+			mensagem.clear();  // reseta flags
+
+			printf("Hotbox message: %s\n", msg.c_str());
+			deposit_messages(msg, 1); // Deposita a mensagem na lista circular
 		}
 
 	}
@@ -215,11 +252,16 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 	HANDLE hEvent;
 	DWORD status;
 	hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-	Message msg;
+	std::string msg;
+	std::ostringstream mensagem;
 
 	while (true) {
+																	//ERRO: mesclar os waitforsingle object num waitformultopleobjects
+																	// com temporizador em vez de 500 de espera
 		int time_ms = (rand() % 1901) + 100; // Gera um número aleatório entre 100 e 2000
 		status = WaitForSingleObject(hEvent, time_ms); // Aguarda o timeout para gerar a próxima mensagem (entre 100 e 2000 ms)
+		// Espera espaço livre no buffer — bloqueia se sem_space == 0.                 
+		WaitForSingleObject(sem_space, INFINITE);
 
 		WaitForSingleObject(hPauseEvent, INFINITE); // Espera até que o evento seja sinalizado (executando)
 		if (status == WAIT_TIMEOUT) {
@@ -227,7 +269,7 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 			long nseq = InterlockedIncrement(&nseq_counter_remote); // Long indica que o tipo de dados deve ter pelo menos 32 bits. Incrementa atomicamente a variável.
 
 			// Tipo
-			msg.type = 00;
+			int msg_type = 00;
 
 			// Diag
 			int diag = rand() % 2; // (0 = Normal, 1 = Falha de hardware da remota)
@@ -236,14 +278,14 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 			long remota = rand() % 1000; // Número da remota (0 a 999)
 
 			// ID 
-			char id[9];
-			generate_random_id(id, sizeof(id));
+			// ID
+			std::string id = generate_random_id();
 
 			// Estado
 			int estado = (rand() % 2) + 1; // Estado do sensor (1 = False, 2 = True)
 
 			if (diag == 1) {
-				strncpy_s(id, "XXXXXXXX", sizeof(id));
+				id = "XXXXXXXX";
 				estado = 0;
 			}
 
@@ -251,35 +293,203 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 			SYSTEMTIME st;
 			GetLocalTime(&st); // Obtém a hora local do sistema
 
-			snprintf(msg.content, sizeof(msg.content),
-				"%07d;%02d;%d;%03d;%s;%d;%02d:%02d:%02d:%03d",
-				nseq,
-				msg.type,
-				diag,
-				remota,
-				id,
-				estado,
-				st.wHour,
-				st.wMinute,
-				st.wSecond,
-				st.wMilliseconds);
 
-			printf("Remote message: %s\n", msg.content);
-			deposit_messages(&cl, msg); // Deposita a mensagem na lista circular
+			mensagem << std::setw(7) << std::setfill('0') << nseq << ";"
+				<< std::setw(2) << std::setfill('0') << msg_type << ";"
+				<< diag << ";"
+				<< std::setw(3) << std::setfill('0') << remota << ";"
+				<< id << ";"
+				<< estado << ";"
+				<< std::setw(2) << std::setfill('0') << st.wHour << ":"
+				<< std::setw(2) << std::setfill('0') << st.wMinute << ":"
+				<< std::setw(2) << std::setfill('0') << st.wSecond << ":"
+				<< std::setw(3) << std::setfill('0') << st.wMilliseconds;
+
+			msg = mensagem.str();
+			mensagem.str("");  // limpa o conteúdo
+			mensagem.clear();  // reseta flags
+
+			printf("Remote message: %s\n", msg.c_str());
+			deposit_messages(msg, 0); // Deposita a mensagem na lista circular
+
 		}
 	}
 	CloseHandle(hEvent);
 	return 0;
+
 }
+
+
+/* ----------- THREAD CAPTURA DE DADOS DE SINALIZAÇÃO FERROVIÁRIA ------------------ */
+DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferroviaria de 40 char
+{
+	Node* cursor = NULL;                 // posição atual de varredura
+	std::vector<std::string> msgVector;   // Vetor para armazenar a mensagem
+
+	while (TRUE) {                      //Substituir True por evento de bloqueio dessa thread                   ERRO
+
+		// Aguarda existir mensagem do meu tipo 
+		WaitForSingleObject(sem_tipo[0], INFINITE);
+
+		// Espera permissão para acessar a lista circular
+		EnterCriticalSection(&cs_list);
+
+		if (!cursor) {                     // Primeira vez: começa no início
+			if (head) {					   // Como ponteiro, head retorna falso apenas se for igual a NULL
+				cursor = head->next;
+			}
+			else {
+				cursor = NULL;
+			}
+		}
+
+		// Percorre a lista até encontrar uma mensagem de 40 char
+		while (cursor && cursor->msg.length() != 40)  
+			cursor = cursor->next;
+
+		if (!cursor) {                   // Se lista vazia 
+			LeaveCriticalSection(&cs_list);
+			continue;
+		}
+
+		Node* alvo = cursor;             // Nó correspondente à mensagem a ser processada
+		cursor = cursor->next;           // Avança para ser usado na próxima busca
+
+
+		// Remoção do nó da lista circular 
+		Node* prev = head;
+		while (prev->next != alvo) prev = prev->next;
+
+		if (alvo == head) {             // Ajusta head se ela estiver sendo removida 
+			if (alvo->next == alvo) {
+				head = NULL;
+				cursor = NULL;
+			}
+			else {
+				head = prev;
+			}
+		}
+		prev->next = alvo->next;        // desvincula alvo
+		LeaveCriticalSection(&cs_list);
+
+
+		// Transforma a mensagem em um vetor de strings
+		msgToVector(alvo, msgVector);
+
+		// Verifica o valor de DIAG e dá destino à mensagem
+		if (std::stoi(msgVector[2]) == 1) {
+			// Enviar mensagem para tarefa 5 por pipes/mailslots
+			printf("DIAG = %s", msgVector[2].c_str());
+			printf("Mensagem Sinalização enviada por pipes: %s\n", alvo->msg.c_str());
+		}
+		else {
+			// Se não tiver espaço no disco: avisar tarefa 6 e bloquear-se, marcar evento de bloqueio
+
+			// Depositar mensagem no disco
+			printf("Mensagem depositada no disco: %s\n", alvo->msg.c_str());
+
+			// Notificar tarefa 4 sobre deposito no disco
+
+		}
+
+		// Esvazia o vetor
+		msgVector.clear();
+
+
+		// Devolve o nó à lista de nós livres e indica espaço livre no buffer
+		recycle_node(alvo);
+		ReleaseSemaphore(sem_space, 1, NULL);
+
+	}
+	return 0;
+}
+
+/* ----------- THREAD CAPTURA DE DADOS DOS DETECTORES DE RODA QUENTE ------------------ */
+DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de rodas quentes de 34 char
+{
+	Node* cursor = NULL;                 // posição inicial de varredura
+
+	while (TRUE) {                      //Substituir True por evento de bloqueio dessa thread                   ERRO
+
+		// Aguarda existir mensagem do meu tipo 
+		WaitForSingleObject(sem_tipo[1], INFINITE);
+
+		// Busca próximo nó do meu tipo na lista circular
+		EnterCriticalSection(&cs_list);
+
+		if (!cursor) {                     // Primeira vez: começa no início
+			if (head) {          // Como ponteiro, head retorna falso apenas se for igual a NULL
+				cursor = head->next;
+			}
+			else { 
+				cursor = NULL;
+			}  
+		}
+
+		while (cursor && cursor->msg.length() != 34)  // Percorre a lista até encontrar uma mensagem de 40 char
+			cursor = cursor->next;
+
+		if (!cursor) {                   // lista vazia 
+			LeaveCriticalSection(&cs_list);
+			continue;
+		}
+
+		Node* alvo = cursor;             // Nó correspondente à mensagem a ser processada
+		cursor = cursor->next;           // Avança para ser usado na próxima busca
+
+
+		// Remoção do nó da lista circular 
+		Node* prev = head;
+		while (prev->next != alvo) prev = prev->next;
+
+		if (alvo == head) {             // Ajusta head se a cauda está sendo removida 
+			if (alvo->next == alvo) {
+				head = NULL;
+				cursor = NULL;
+			}
+			else {
+				head = prev;
+			}
+		}
+		prev->next = alvo->next;        // desvincula alvo
+		LeaveCriticalSection(&cs_list);
+
+
+		// Enviar mensagem para tarefa 5 por pipes/mailslots
+		printf("Mensagem Rodas enviada por pipes: %s\n", alvo->msg.c_str());
+
+
+
+
+		// Devolve o nó à lista de nós livres e indica espaço livre no buffer
+		recycle_node(alvo);
+		ReleaseSemaphore(sem_space, 1, NULL);
+
+	}
+	return 0;
+}
+
+
+
 
 int main() {
 
 	DWORD dwThreadIdKeyboard;
 	DWORD dwThreadIdHotbox;
 	DWORD dwThreadIdRemote;
+	DWORD dwThreadSinalizacao;
+	DWORD dwThreadRodasQuentes;
 	DWORD dwExitCode;
 
-	initialize_circular_list(&cl);
+	SetConsoleOutputCP(CP_ACP);
+	InitializeCriticalSection(&cs_list);
+	initialize_circular_list();
+
+	//sem_space inicia em 200 => 200 vagas disponíveis           
+	//sem_tipo[k] inicia em 0  => nenhuma mensagem disponivel para leitura     
+	sem_space = CreateSemaphore(NULL, CAP_BUFF, CAP_BUFF, NULL);
+	sem_tipo[0] = CreateSemaphore(NULL, 0, CAP_BUFF, NULL);
+	sem_tipo[1] = CreateSemaphore(NULL, 0, CAP_BUFF, NULL);
 
 	hPauseEvent = CreateEvent(
 		NULL,   // Atributos de segurança padrão
@@ -296,6 +506,8 @@ int main() {
 	HANDLE keyboardThread = CreateThread(NULL, 0, keyboard_control_thread, NULL, 0, &dwThreadIdKeyboard);
 	HANDLE hotboxThread = CreateThread(NULL, 0, generate_hotbox_message, NULL, 0, &dwThreadIdHotbox);
 	HANDLE remoteThread = CreateThread(NULL, 0, generate_remote_message, NULL, 0, &dwThreadIdRemote);
+	HANDLE sinalizacaoThread = CreateThread(NULL, 0, captura_sinalizacao, NULL, 0, &dwThreadSinalizacao);
+	HANDLE rodasQuentesThread = CreateThread(NULL, 0, captura_rodas_quentes, NULL, 0, &dwThreadRodasQuentes);
 
 	if (hotboxThread) {
 		printf("Thread hotbox criada com ID = %0x \n", dwThreadIdHotbox);
@@ -305,12 +517,20 @@ int main() {
 		printf("Thread remota criada com ID = %0x \n", dwThreadIdRemote);
 	}
 
+	if (rodasQuentesThread) {
+		printf("Thread rodas quentes criada com ID = %0x \n", dwThreadRodasQuentes);
+	}
+
+	if (sinalizacaoThread) {
+		printf("Thread sinalização criada com ID = %0x \n", dwThreadSinalizacao);
+	}
+
 	if (keyboardThread) {
 		printf("Thread de controle do teclado criada com ID = %0x \n", dwThreadIdKeyboard);
 		WaitForSingleObject(keyboardThread, INFINITE);
 	}
 
-	print_circular_list(&cl); // Exibe o conteúdo da lista circular
+	//print_circular_list(&cl); // Exibe o conteúdo da lista circular
 
 	GetExitCodeThread(hotboxThread, &dwExitCode);
 	CloseHandle(hotboxThread);
@@ -318,8 +538,19 @@ int main() {
 	GetExitCodeThread(remoteThread, &dwExitCode);
 	CloseHandle(remoteThread);
 
+	GetExitCodeThread(sinalizacaoThread, &dwExitCode);
+	CloseHandle(sinalizacaoThread);
+
+	GetExitCodeThread(rodasQuentesThread, &dwExitCode);
+	CloseHandle(rodasQuentesThread);
+
 	GetExitCodeThread(keyboardThread, &dwExitCode);
 	CloseHandle(keyboardThread);
+
+	CloseHandle(sem_space); 
+	CloseHandle(sem_tipo[0]); 
+	CloseHandle(sem_tipo[1]);
+	DeleteCriticalSection(&cs_list);
 
 	return EXIT_SUCCESS;
 }
