@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
-
+#include <fstream>
 
 #define CAP_BUFF 200         // capacidade do buffer circular, 200 mensagens
 
@@ -25,16 +25,18 @@ typedef struct Node {
 } Node;
 
 CRITICAL_SECTION cs_list;  // protege lista e free_list
+CRITICAL_SECTION file_access; // Protege acesso ao arquivo de log (txt)
+
 Node  pool[CAP_BUFF];      // bloco de nós pré-alocado
 Node* free_list = NULL;    // nós livres
 Node* head = NULL;         // Último elemento da lista circular (head->next é o 1.º e tb o 1° que deve ser consumido)
 
 HANDLE sem_tipo[2];        // um semáforo por tipo de mensagem para indicar que há mensagem do respectivo tipo
 HANDLE sem_space;          // conta nós livres no buffer (0–200)
-
+HANDLE sem_txtspace;      // conta espaço livre no arquivo em disco (txt) (0-200)
 
 HANDLE hPauseEvent; // Handle para controle de pausa/continuação
-
+HANDLE hRemoteEvent; // Handle para sinalizar que há mensagens no arquivo de disco para a tarefa 4
 
 
 // Inicialização da lista
@@ -325,6 +327,8 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 {
 	Node* cursor = NULL;                 // posição atual de varredura
 	std::vector<std::string> msgVector;   // Vetor para armazenar a mensagem
+	int lineCount = 0;
+	DWORD dwWaitResult;
 
 	while (TRUE) {                      //Substituir True por evento de bloqueio dessa thread                   ERRO
 
@@ -379,16 +383,32 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 		// Verifica o valor de DIAG e dá destino à mensagem
 		if (std::stoi(msgVector[2]) == 1) {
 			// Enviar mensagem para tarefa 5 por pipes/mailslots
-			printf("DIAG = %s", msgVector[2].c_str());
-			printf("Mensagem Sinalização enviada por pipes: %s\n", alvo->msg.c_str());
+			printf("DIAG = %s, ", msgVector[2].c_str());
+			printf("Mensagem de Sinalizacao enviada por pipes para visualizacao de rodas quentes: %s\n", alvo->msg.c_str());
 		}
 		else {
-			// Se não tiver espaço no disco: avisar tarefa 6 e bloquear-se, marcar evento de bloqueio
+			// Se não tiver espaço no disco: avisar tarefa 4 e bloquear-se, marcar evento de bloqueio
+			
+			//sem_txtspace = OpenSemaphore(SEMAPHORE_MODIFY_STATE, FALSE, TEXT("SemaforoEspacoDisco"));
+			dwWaitResult = WaitForSingleObject(sem_txtspace, INFINITE); // Espera espaço no disco (pode até 200 mensagens no máximo) (Decrementa valor do semáforo)
+			if (dwWaitResult == WAIT_OBJECT_0) {
+				EnterCriticalSection(&file_access);
 
-			// Depositar mensagem no disco
-			printf("Mensagem depositada no disco: %s\n", alvo->msg.c_str());
+				// Depositar mensagem no disco
+				std::ofstream outfile("sinalizacao.txt", std::ios::app);
+				if (outfile.is_open()) {
+					outfile << alvo->msg.c_str() << std::endl;
+					outfile.close();
+					printf("Mensagem depositada no disco: %s\n", alvo->msg.c_str());
+					SetEvent(hRemoteEvent); // Sinaliza que há mensagem no arquivo de disco
+				}
+				else
+					printf("Erro ao abrir o arquivo de disco para escrita.\n");
+			}
+			else
+				printf("Erro ao esperar por espaço no disco: %d\n", GetLastError());
 
-			// Notificar tarefa 4 sobre deposito no disco
+			LeaveCriticalSection(&file_access);
 
 		}
 
@@ -426,7 +446,7 @@ DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de ro
 			}  
 		}
 
-		while (cursor && cursor->msg.length() != 34)  // Percorre a lista até encontrar uma mensagem de 40 char
+		while (cursor && cursor->msg.length() != 34)  // Percorre a lista até encontrar uma mensagem de 34 char
 			cursor = cursor->next;
 
 		if (!cursor) {                   // lista vazia 
@@ -456,9 +476,7 @@ DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de ro
 
 
 		// Enviar mensagem para tarefa 5 por pipes/mailslots
-		printf("Mensagem Rodas enviada por pipes: %s\n", alvo->msg.c_str());
-
-
+		printf("Mensagem de rodas quentes enviada por pipes: %s\n", alvo->msg.c_str());
 
 
 		// Devolve o nó à lista de nós livres e indica espaço livre no buffer
@@ -468,9 +486,6 @@ DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de ro
 	}
 	return 0;
 }
-
-
-
 
 int main() {
 
@@ -483,6 +498,7 @@ int main() {
 
 	SetConsoleOutputCP(CP_ACP);
 	InitializeCriticalSection(&cs_list);
+	InitializeCriticalSection(&file_access);
 	initialize_circular_list();
 
 	//sem_space inicia em 200 => 200 vagas disponíveis           
@@ -490,6 +506,7 @@ int main() {
 	sem_space = CreateSemaphore(NULL, CAP_BUFF, CAP_BUFF, NULL);
 	sem_tipo[0] = CreateSemaphore(NULL, 0, CAP_BUFF, NULL);
 	sem_tipo[1] = CreateSemaphore(NULL, 0, CAP_BUFF, NULL);
+	sem_txtspace = CreateSemaphore(NULL, 10, 10, TEXT("SemaforoEspacoDisco"));
 
 	hPauseEvent = CreateEvent(
 		NULL,   // Atributos de segurança padrão
@@ -497,6 +514,7 @@ int main() {
 		TRUE,   // Estado inicial (sinalizado = executando)
 		NULL    // Sem nome
 	);
+	hRemoteEvent = CreateEvent(NULL, FALSE, FALSE, TEXT("RemoteEvent"));
 
 	if (hPauseEvent == NULL) {
 		printf("Erro ao criar evento: %d\n", GetLastError());
@@ -522,11 +540,11 @@ int main() {
 	}
 
 	if (sinalizacaoThread) {
-		printf("Thread sinalização criada com ID = %0x \n", dwThreadSinalizacao);
+		printf("Thread sinalizacao criada com ID = %0x \n", dwThreadSinalizacao);
 	}
 
 	if (keyboardThread) {
-		printf("Thread de controle do teclado criada com ID = %0x \n", dwThreadIdKeyboard);
+		printf("Thread de controle do teclado criada com ID = %0x \n\n", dwThreadIdKeyboard);
 		WaitForSingleObject(keyboardThread, INFINITE);
 	}
 
