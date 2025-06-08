@@ -18,6 +18,7 @@
 // Variável global para NSEQ do hotbox e da remota
 static LONG nseq_counter_hotbox = 0;
 static LONG nseq_counter_remote = 0;
+static LONG sem_space_counter = CAP_BUFF;  // Contador para indicar o valor do semáforo sem_space (número de espaços livres na lista)
 
 typedef struct Node {
 	std::string       msg;       // Conteudo da mensagem
@@ -194,13 +195,13 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 	hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 	std::string msg;
 	std::ostringstream mensagem;
+	int threadBloqueada = -1;
 
 	while (true) {
 		                                                                 //ERRO: mesclar os waitforsingle object num waitformultopleobjects
 		                                                                 // com temporizador em vez de 500 de espera
 		status = WaitForSingleObject(hEvent, 500); // Aguarda o timeout de 500ms para gerar a próxima mensagem
-		// Espera espaço livre no buffer — bloqueia se sem_space == 0.                 
-		WaitForSingleObject(sem_space, INFINITE);
+		
 
 		WaitForSingleObject(hPauseEvent, INFINITE); // Espera até que o evento seja sinalizado (executando)
 		if (status == WAIT_TIMEOUT) {
@@ -238,7 +239,20 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 			mensagem.str("");  // limpa o conteúdo
 			mensagem.clear();  // reseta flags
 
-			printf("Hotbox message: %s\n", msg.c_str());
+			// Espera espaço livre no buffer 
+			if (InterlockedCompareExchange(&sem_space_counter, 0, 0) == 0) { //Interlock... returns the initial value of the Destination parameter
+				std::cout << "Geracao de mensagens Hotbox bloqueada devido a falta de espaco na lista" << std::endl;
+				threadBloqueada = 1;
+			}
+			WaitForSingleObject(sem_space, INFINITE);
+			InterlockedDecrement(&sem_space_counter);
+
+			if (threadBloqueada == 1) {
+				std::cout << "Geracao de mensagens Hotbox desbloqueada" << std::endl;
+				threadBloqueada = 0;
+			}
+
+			//printf("Hotbox message: %s\n", msg.c_str());
 			deposit_messages(msg, 1); // Deposita a mensagem na lista circular
 		}
 
@@ -256,14 +270,14 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 	hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 	std::string msg;
 	std::ostringstream mensagem;
+	int threadBloqueada = -1;
 
 	while (true) {
 																	//ERRO: mesclar os waitforsingle object num waitformultopleobjects
 																	// com temporizador em vez de 500 de espera
 		int time_ms = (rand() % 1901) + 100; // Gera um número aleatório entre 100 e 2000
 		status = WaitForSingleObject(hEvent, time_ms); // Aguarda o timeout para gerar a próxima mensagem (entre 100 e 2000 ms)
-		// Espera espaço livre no buffer — bloqueia se sem_space == 0.                 
-		WaitForSingleObject(sem_space, INFINITE);
+		
 
 		WaitForSingleObject(hPauseEvent, INFINITE); // Espera até que o evento seja sinalizado (executando)
 		if (status == WAIT_TIMEOUT) {
@@ -311,7 +325,21 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 			mensagem.str("");  // limpa o conteúdo
 			mensagem.clear();  // reseta flags
 
-			printf("Remote message: %s\n", msg.c_str());
+			// Espera espaço livre no buffer 
+			if (InterlockedCompareExchange(&sem_space_counter, 0, 0) == 0) { //Interlock... returns the initial value of the Destination parameter
+				std::cout << "Geracao de mensagens das Remotas bloqueada devido a falta de espaco na lista" << std::endl;
+				threadBloqueada = 1;
+			}
+			WaitForSingleObject(sem_space, INFINITE);
+			InterlockedDecrement(&sem_space_counter);
+
+			if (threadBloqueada == 1) {
+				std::cout << "Geracao de mensagens das Remotas desbloqueada" << std::endl;
+				threadBloqueada = 0;
+			}
+			
+
+			//printf("Remote message: %s\n", msg.c_str());
 			deposit_messages(msg, 0); // Deposita a mensagem na lista circular
 
 		}
@@ -328,7 +356,7 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 	Node* cursor = NULL;                 // posição atual de varredura
 	std::vector<std::string> msgVector;   // Vetor para armazenar a mensagem
 	int lineCount = 0;
-	DWORD dwWaitResult;
+	
 
 	while (TRUE) {                      //Substituir True por evento de bloqueio dessa thread                   ERRO
 
@@ -382,7 +410,11 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 
 		// Verifica o valor de DIAG e dá destino à mensagem
 		if (std::stoi(msgVector[2]) == 1) {
+
+
 			// Enviar mensagem para tarefa 5 por pipes/mailslots
+
+
 			printf("DIAG = %s, ", msgVector[2].c_str());
 			printf("Mensagem de Sinalizacao enviada por pipes para visualizacao de rodas quentes: %s\n", alvo->msg.c_str());
 		}
@@ -390,10 +422,17 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 			// Se não tiver espaço no disco: avisar tarefa 4 e bloquear-se, marcar evento de bloqueio
 			
 			//sem_txtspace = OpenSemaphore(SEMAPHORE_MODIFY_STATE, FALSE, TEXT("SemaforoEspacoDisco"));
-			dwWaitResult = WaitForSingleObject(sem_txtspace, INFINITE); // Espera espaço no disco (pode até 200 mensagens no máximo) (Decrementa valor do semáforo)
-			if (dwWaitResult == WAIT_OBJECT_0) {
-				EnterCriticalSection(&file_access);
+			DWORD dwWaitResult = WaitForSingleObject(sem_txtspace, 0); // Espera espaço no disco (pode até 200 mensagens no máximo) (Decrementa valor do semáforo)
+			DWORD dwWaitResult2 = 1;
+			if (dwWaitResult == WAIT_TIMEOUT) {
+				std::cout << "Arquivo cheio. Captura de dados de sinalizacao bloqueada aguardando espaço livre" << std::endl;
+				dwWaitResult2 = WaitForSingleObject(sem_txtspace, INFINITE);
+			}
 
+			EnterCriticalSection(&file_access);
+			
+			if (dwWaitResult == WAIT_OBJECT_0 || dwWaitResult2 == WAIT_OBJECT_0) {
+				
 				// Depositar mensagem no disco
 				std::ofstream outfile("sinalizacao.txt", std::ios::app);
 				if (outfile.is_open()) {
@@ -419,6 +458,7 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 		// Devolve o nó à lista de nós livres e indica espaço livre no buffer
 		recycle_node(alvo);
 		ReleaseSemaphore(sem_space, 1, NULL);
+		InterlockedIncrement(&sem_space_counter);
 
 	}
 	return 0;
@@ -482,7 +522,7 @@ DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de ro
 		// Devolve o nó à lista de nós livres e indica espaço livre no buffer
 		recycle_node(alvo);
 		ReleaseSemaphore(sem_space, 1, NULL);
-
+		InterlockedIncrement(&sem_space_counter);
 	}
 	return 0;
 }
@@ -534,7 +574,7 @@ int main() {
 	if (remoteThread) {
 		printf("Thread remota criada com ID = %0x \n", dwThreadIdRemote);
 	}
-
+	
 	if (rodasQuentesThread) {
 		printf("Thread rodas quentes criada com ID = %0x \n", dwThreadRodasQuentes);
 	}
@@ -542,7 +582,7 @@ int main() {
 	if (sinalizacaoThread) {
 		printf("Thread sinalizacao criada com ID = %0x \n", dwThreadSinalizacao);
 	}
-
+	
 	if (keyboardThread) {
 		printf("Thread de controle do teclado criada com ID = %0x \n\n", dwThreadIdKeyboard);
 		WaitForSingleObject(keyboardThread, INFINITE);
@@ -555,13 +595,13 @@ int main() {
 
 	GetExitCodeThread(remoteThread, &dwExitCode);
 	CloseHandle(remoteThread);
-
+	
 	GetExitCodeThread(sinalizacaoThread, &dwExitCode);
 	CloseHandle(sinalizacaoThread);
 
 	GetExitCodeThread(rodasQuentesThread, &dwExitCode);
 	CloseHandle(rodasQuentesThread);
-
+	
 	GetExitCodeThread(keyboardThread, &dwExitCode);
 	CloseHandle(keyboardThread);
 
