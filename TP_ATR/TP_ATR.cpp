@@ -13,7 +13,7 @@
 #include <vector>
 #include <fstream>
 
-#define CAP_BUFF 200         // capacidade do buffer circular, 200 mensagens
+#define CAP_BUFF 20         // capacidade do buffer circular, 200 mensagens
 
 // Variável global para NSEQ do hotbox e da remota
 static LONG nseq_counter_hotbox = 0;
@@ -36,8 +36,13 @@ HANDLE sem_tipo[2];        // um semáforo por tipo de mensagem para indicar que 
 HANDLE sem_space;          // conta nós livres no buffer (0–200)
 HANDLE sem_txtspace;      // conta espaço livre no arquivo em disco (txt) (0-200)
 
-HANDLE hPauseEvent; // Handle para controle de pausa/continuação
 HANDLE hRemoteEvent; // Handle para sinalizar que há mensagens no arquivo de disco para a tarefa 4
+HANDLE hFinishAllEvent; // Evento para encerrar todas as threads do programa
+HANDLE hPauseEventC; // Handle para controle de pausa/continuação
+HANDLE hPauseEventD; // Handle para controle de pausa/continuação
+HANDLE hPauseEventH; // Handle para controle de pausa/continuação
+HANDLE hPauseEventS; // Handle para controle de pausa/continuação
+HANDLE hPauseEventQ; // Handle para controle de pausa/continuação
 
 
 // Inicialização da lista
@@ -157,40 +162,115 @@ DWORD WINAPI keyboard_control_thread(LPVOID) {
 	/*
 	* Controle do teclado para pausar e continuar a execução das threads.
 	*/
-	int nTecla = 0;
+	int Tecla = 0;
 	int paused = 0;
+	DWORD pausedC; 
+	DWORD pausedD;
+	DWORD pausedH;
+	DWORD pausedS;
+	DWORD pausedQ;
 	printf("Pressione 'c' para pausar/continuar a simulacao ou 'ESC' para encerrar...\n\n");
 
-	while(1) {
-		nTecla = _getch();
-		if (nTecla == 'c' || nTecla == 'C') {
-			paused = ~paused; // Alterna entre 0 e 1
-
-			//DWORD dwWaitResult = WaitForSingleObject(hPauseEvent, 0); // Verifica o estado do evento
-			if (paused) {
-				ResetEvent(hPauseEvent);
-				printf("Simulacao PAUSADA\n\n");
-			}
-			else {
-				SetEvent(hPauseEvent); // Sinaliza o evento (executando)
-				printf("Simulacao CONTINUANDO\n");
-			}
+	while(TRUE) {
+		Tecla = _getch();
+		
+		switch (Tecla) {
+			case 'c':
+			case 'C':
+				pausedC =  WaitForSingleObject(hPauseEventC, 0);
+				if (pausedC == WAIT_OBJECT_0) {
+					ResetEvent(hPauseEventC);
+					std::cout << "Geracao de mensagens PAUSADA." << std::endl;
+				}
+				else if (pausedC == WAIT_TIMEOUT) {
+					SetEvent(hPauseEventC);
+					std::cout << "Geracao de mensagens CONTINUANDO." << std::endl;
+				}
+				else {
+					std::cout << "Problema ao pausar a geracao de mensagens: " << pausedC << std::endl;
+				}
+				break;
+			case 'd':
+			case 'D':
+				pausedD = WaitForSingleObject(hPauseEventD, 0);
+				if (pausedD == WAIT_OBJECT_0) {
+					ResetEvent(hPauseEventD);
+					std::cout << "Captura de dados de sinalizacao PAUSADA." << std::endl;
+				}
+				else if (pausedD == WAIT_TIMEOUT) {
+					SetEvent(hPauseEventD);
+					std::cout << "Captura de dados de sinalizacao CONTINUANDO." << std::endl;
+				}
+				else {
+					std::cout << "Problema ao pausar a captura de dados de sinalizacao: " << pausedD << std::endl;
+				}
+				break;
+			case 'h':
+			case 'H':
+				pausedH = WaitForSingleObject(hPauseEventH, 0);
+				if (pausedH == WAIT_OBJECT_0) {
+					ResetEvent(hPauseEventH);
+					std::cout << "Captura de dados de rodas quentes PAUSADA." << std::endl;
+				}
+				else if (pausedH == WAIT_TIMEOUT) {
+					SetEvent(hPauseEventH);
+					std::cout << "Captura de dados de rodas quentes CONTINUANDO." << std::endl;
+				}
+				else {
+					std::cout << "Problema ao pausar a captura de dados de rodas quentes: " << pausedH << std::endl;
+				}
+				break;
+			case 's':
+			case 'S':
+				pausedS = WaitForSingleObject(hPauseEventS, 0);
+				if (pausedS == WAIT_OBJECT_0) {
+					ResetEvent(hPauseEventS);
+					std::cout << "Exibicao de dados de sinalizacao PAUSADA." << std::endl;
+				}
+				else if (pausedS == WAIT_TIMEOUT) {
+					SetEvent(hPauseEventS);
+					std::cout << "Exibicao de dados de sinalizacao CONTINUANDO." << std::endl;
+				}
+				else {
+					std::cout << "Problema ao pausar a exibicao de dados de sinalizacao: " << pausedS << std::endl;
+				}
+				break;
+			case 'q':
+			case 'Q':
+				pausedQ = WaitForSingleObject(hPauseEventQ, 0);
+				if (pausedQ == WAIT_OBJECT_0) {
+					ResetEvent(hPauseEventQ);
+					std::cout << "Exibicao de rodas quentes PAUSADA." << std::endl;
+				}
+				else if (pausedQ == WAIT_TIMEOUT) {
+					SetEvent(hPauseEventQ);
+					std::cout << "Exibicao de rodas quentes CONTINUANDO." << std::endl;
+				}
+				else {
+					std::cout << "Problema ao pausar a exibicao de rodas quentes: " << pausedQ << std::endl;
+				}
+				break;
+			case 27:    //ESC
+				SetEvent(hFinishAllEvent);
+				printf("Esc pressionado. Encerrando...\n");
+				return 0;
+			default:
+				std::cout << "Entrada inválida!" << std::endl;
+				
 		}
 
-		else if (nTecla == 27) {
-			printf("Esc pressionado. Encerrando...\n");
-			return 0;
-		}
+		
 
 	}
 	return 0;
 }
 
 DWORD WINAPI generate_hotbox_message(LPVOID) {
-	/*
-	* Mensagens provenientes dos detectores de rodas quentes (hotbox).
-	*/
+	// Mensagens provenientes dos detectores de rodas quentes (hotbox).
+	
 	HANDLE hEvent;
+	HANDLE hExecuting[2] = { hFinishAllEvent, hPauseEventC };
+	HANDLE hMultObj[2] = { hFinishAllEvent, sem_space };
 	DWORD status;
 	hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 	std::string msg;
@@ -198,12 +278,20 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 	int threadBloqueada = -1;
 
 	while (true) {
-		                                                                 //ERRO: mesclar os waitforsingle object num waitformultopleobjects
-		                                                                 // com temporizador em vez de 500 de espera
+		// Checa se deve encerrar ou pausar
+		DWORD finish = WaitForMultipleObjects(2, hExecuting, FALSE, INFINITE);
+		if ((finish - WAIT_OBJECT_0) == 0) {
+			std::cout << "FINISH 1 HOTBOX " << std::endl;
+			break;
+		}
+		if ((finish - WAIT_OBJECT_0) != 0 && (finish - WAIT_OBJECT_0) != 1) {
+			printf("CLP: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+			return 1;
+		}                                                            
+
 		status = WaitForSingleObject(hEvent, 500); // Aguarda o timeout de 500ms para gerar a próxima mensagem
 		
 
-		WaitForSingleObject(hPauseEvent, INFINITE); // Espera até que o evento seja sinalizado (executando)
 		if (status == WAIT_TIMEOUT) {
 			// NSEQ
 			LONG nseq = InterlockedIncrement(&nseq_counter_hotbox); // Long indica que o tipo de dados deve ter pelo menos 32 bits. Incrementa atomicamente a variável.
@@ -244,7 +332,16 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 				std::cout << "Geracao de mensagens Hotbox bloqueada devido a falta de espaco na lista" << std::endl;
 				threadBloqueada = 1;
 			}
-			WaitForSingleObject(sem_space, INFINITE);
+			
+			DWORD dwWaitResult2 = WaitForMultipleObjects(2, hMultObj, FALSE, INFINITE); //Espera comando para finalizar ou espaco no buffer
+			if ((dwWaitResult2 - WAIT_OBJECT_0) == 0) {
+				std::cout << "FINISH 2 HOTBOX " << std::endl;
+				break;
+			}
+			if ((dwWaitResult2 - WAIT_OBJECT_0) != 0 && (dwWaitResult2 - WAIT_OBJECT_0) != 1) {
+				printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+				return 1;
+			}
 			InterlockedDecrement(&sem_space_counter);
 
 			if (threadBloqueada == 1) {
@@ -258,6 +355,7 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 
 	}
 	CloseHandle(hEvent);
+	std::cout << "FIM Geracao de mensagens Hotbox " << std::endl;
 	return 0;
 }
 
@@ -266,20 +364,32 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 	* Mensagens de sinalização provenientes das remotas de E/S.
 	*/
 	HANDLE hEvent;
+	HANDLE hExecuting[2] = {hFinishAllEvent, hPauseEventC};
+	HANDLE hMultObj[2] = { hFinishAllEvent, sem_space };
 	DWORD status;
 	hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 	std::string msg;
 	std::ostringstream mensagem;
 	int threadBloqueada = -1;
 
+
 	while (true) {
-																	//ERRO: mesclar os waitforsingle object num waitformultopleobjects
-																	// com temporizador em vez de 500 de espera
+
+		// Checa se deve encerrar ou pausar
+		DWORD finish = WaitForMultipleObjects(2, hExecuting, FALSE, INFINITE);
+		if ((finish - WAIT_OBJECT_0) ==  0) {
+			std::cout << "FINISH 1 REMOTE " << std::endl;
+			break;
+		}
+		if ((finish - WAIT_OBJECT_0) != 0 && (finish - WAIT_OBJECT_0) != 1) {
+			printf("CLP: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+			return 1;
+		}
+
 		int time_ms = (rand() % 1901) + 100; // Gera um número aleatório entre 100 e 2000
 		status = WaitForSingleObject(hEvent, time_ms); // Aguarda o timeout para gerar a próxima mensagem (entre 100 e 2000 ms)
 		
 
-		WaitForSingleObject(hPauseEvent, INFINITE); // Espera até que o evento seja sinalizado (executando)
 		if (status == WAIT_TIMEOUT) {
 			// NSEQ
 			long nseq = InterlockedIncrement(&nseq_counter_remote); // Long indica que o tipo de dados deve ter pelo menos 32 bits. Incrementa atomicamente a variável.
@@ -325,12 +435,20 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 			mensagem.str("");  // limpa o conteúdo
 			mensagem.clear();  // reseta flags
 
-			// Espera espaço livre no buffer 
+			// Espera espaço livre no buffer ou finalizacao
 			if (InterlockedCompareExchange(&sem_space_counter, 0, 0) == 0) { //Interlock... returns the initial value of the Destination parameter
 				std::cout << "Geracao de mensagens das Remotas bloqueada devido a falta de espaco na lista" << std::endl;
 				threadBloqueada = 1;
 			}
-			WaitForSingleObject(sem_space, INFINITE);
+			DWORD dwWaitResult2 = WaitForMultipleObjects(2, hMultObj, FALSE, INFINITE); //Espera comando para finalizar ou espaco no buffer
+			if (dwWaitResult2 - WAIT_OBJECT_0 == 0) {
+				std::cout << "FINISH 2 REMOTE " << std::endl;
+				break;
+			}
+			if (dwWaitResult2 - WAIT_OBJECT_0 != 0 && dwWaitResult2 - WAIT_OBJECT_0 != 1) {
+				printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+				return 1;
+			}
 			InterlockedDecrement(&sem_space_counter);
 
 			if (threadBloqueada == 1) {
@@ -345,6 +463,7 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 		}
 	}
 	CloseHandle(hEvent);
+	std::cout << "FIM Geracao de mensagens das Remotas" << std::endl;
 	return 0;
 
 }
@@ -356,12 +475,36 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 	Node* cursor = NULL;                 // posição atual de varredura
 	std::vector<std::string> msgVector;   // Vetor para armazenar a mensagem
 	int lineCount = 0;
+	HANDLE hExecuting[2] = { hFinishAllEvent, hPauseEventD };
+	HANDLE hMultObj2[2] = { hFinishAllEvent, sem_txtspace };
+	HANDLE hMultObj[2] = { hFinishAllEvent, sem_tipo[0] };
 	
 
 	while (TRUE) {                      //Substituir True por evento de bloqueio dessa thread                   ERRO
+		
+		// Checa se deve encerrar ou pausar
+		DWORD finish = WaitForMultipleObjects(2, hExecuting, FALSE, INFINITE);
+		if ((finish - WAIT_OBJECT_0) == 0) {
+			std::cout << "FINISH 1 SINALIZACAO " << std::endl;
+			break;
+		}
+		if ((finish - WAIT_OBJECT_0) != 0 && (finish - WAIT_OBJECT_0) != 1) {
+			printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+			return 1;
+		}
 
-		// Aguarda existir mensagem do meu tipo 
-		WaitForSingleObject(sem_tipo[0], INFINITE);
+
+		
+		// Aguarda comando de finalizar ou existir mensagem do meu tipo 
+		DWORD dwWaitResult2 = WaitForMultipleObjects(2, hMultObj, FALSE, INFINITE);
+		if ((dwWaitResult2 - WAIT_OBJECT_0) == 0) {
+			std::cout << "FINISH 2 SINALIZACAO " << std::endl;
+			break;
+		}
+		if ((dwWaitResult2 - WAIT_OBJECT_0) != 0 && (dwWaitResult2 - WAIT_OBJECT_0) != 1) {
+			printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+			return 1;
+		}
 
 		// Espera permissão para acessar a lista circular
 		EnterCriticalSection(&cs_list);
@@ -419,19 +562,25 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 			printf("Mensagem de Sinalizacao enviada por pipes para visualizacao de rodas quentes: %s\n", alvo->msg.c_str());
 		}
 		else {
-			// Se não tiver espaço no disco: avisar tarefa 4 e bloquear-se, marcar evento de bloqueio
 			
-			//sem_txtspace = OpenSemaphore(SEMAPHORE_MODIFY_STATE, FALSE, TEXT("SemaforoEspacoDisco"));
 			DWORD dwWaitResult = WaitForSingleObject(sem_txtspace, 0); // Espera espaço no disco (pode até 200 mensagens no máximo) (Decrementa valor do semáforo)
 			DWORD dwWaitResult2 = 1;
 			if (dwWaitResult == WAIT_TIMEOUT) {
 				std::cout << "Arquivo cheio. Captura de dados de sinalizacao bloqueada aguardando espaço livre" << std::endl;
-				dwWaitResult2 = WaitForSingleObject(sem_txtspace, INFINITE);
+				dwWaitResult2 = WaitForMultipleObjects(2, hMultObj2, FALSE, INFINITE); //Espera comando para finalizar ou espaco no disco
+				if ((dwWaitResult2 - WAIT_OBJECT_0) == 0) {
+					std::cout << "FINISH 3 SINALIZACAO " << std::endl;
+					break;
+				}
+				if ((dwWaitResult2 - WAIT_OBJECT_0) != 0 && (dwWaitResult2 - WAIT_OBJECT_0) != 1) {
+					printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+					return 1;
+				}
 			}
 
 			EnterCriticalSection(&file_access);
 			
-			if (dwWaitResult == WAIT_OBJECT_0 || dwWaitResult2 == WAIT_OBJECT_0) {
+			if ((dwWaitResult == WAIT_OBJECT_0) || (dwWaitResult2 - WAIT_OBJECT_0) == 1) {
 				
 				// Depositar mensagem no disco
 				std::ofstream outfile("sinalizacao.txt", std::ios::app);
@@ -461,6 +610,7 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 		InterlockedIncrement(&sem_space_counter);
 
 	}
+	std::cout << "FIM Sinalizacao" << std::endl;
 	return 0;
 }
 
@@ -468,11 +618,32 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de rodas quentes de 34 char
 {
 	Node* cursor = NULL;                 // posição inicial de varredura
+	HANDLE hExecuting[2] = { hFinishAllEvent, hPauseEventH };
+	HANDLE hMultObj[2] = { hFinishAllEvent, sem_tipo[1] };
 
-	while (TRUE) {                      //Substituir True por evento de bloqueio dessa thread                   ERRO
+	while (TRUE) {                
 
-		// Aguarda existir mensagem do meu tipo 
-		WaitForSingleObject(sem_tipo[1], INFINITE);
+		// Checa se deve encerrar ou pausar
+		DWORD finish = WaitForMultipleObjects(2, hExecuting, FALSE, INFINITE);
+		if ((finish - WAIT_OBJECT_0) == 0) {
+			std::cout << "FINISH 1 RODAS " << std::endl;
+			break;
+		}
+		if ((finish - WAIT_OBJECT_0) != 0 && (finish - WAIT_OBJECT_0) != 1) {
+			printf("Rodas Quentes: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+			return 1;
+		}
+
+		// Aguarda comando de finalizar ou existir mensagem do meu tipo 
+		DWORD dwWaitResult2 = WaitForMultipleObjects(2, hMultObj, FALSE, INFINITE); 
+		if ((dwWaitResult2 - WAIT_OBJECT_0) == 0) {
+			std::cout << "FINISH 2 RODAS " << std::endl;
+			break;
+		}
+		if ((dwWaitResult2 - WAIT_OBJECT_0) != 0 && (dwWaitResult2 - WAIT_OBJECT_0) != 1) {
+			printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+			return 1;
+		}
 
 		// Busca próximo nó do meu tipo na lista circular
 		EnterCriticalSection(&cs_list);
@@ -524,6 +695,7 @@ DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de ro
 		ReleaseSemaphore(sem_space, 1, NULL);
 		InterlockedIncrement(&sem_space_counter);
 	}
+	std::cout << "FIM Rodas quentes" << std::endl;
 	return 0;
 }
 
@@ -546,26 +718,64 @@ int main() {
 	sem_space = CreateSemaphore(NULL, CAP_BUFF, CAP_BUFF, NULL);
 	sem_tipo[0] = CreateSemaphore(NULL, 0, CAP_BUFF, NULL);
 	sem_tipo[1] = CreateSemaphore(NULL, 0, CAP_BUFF, NULL);
-	sem_txtspace = CreateSemaphore(NULL, 10, 10, TEXT("SemaforoEspacoDisco"));
+	sem_txtspace = CreateSemaphore(NULL, 200, 200, TEXT("SemaforoEspacoDisco"));
 
-	hPauseEvent = CreateEvent(
+	hPauseEventC = CreateEvent(
 		NULL,   // Atributos de segurança padrão
 		TRUE,   // Manual-reset (nós controlamos o reset)
 		TRUE,   // Estado inicial (sinalizado = executando)
 		NULL    // Sem nome
 	);
-	hRemoteEvent = CreateEvent(NULL, FALSE, FALSE, TEXT("RemoteEvent"));
-
-	if (hPauseEvent == NULL) {
-		printf("Erro ao criar evento: %d\n", GetLastError());
+	if (hPauseEventC == NULL) {
+		printf("Erro ao criar evento hPauseEventC: %d\n", GetLastError());
 		return 1;
 	}
+
+	hPauseEventD = CreateEvent(NULL, TRUE, TRUE, TEXT("PauseEventD"));
+	if (hPauseEventD == NULL) {
+		printf("Erro ao criar evento hPauseEventD: %d\n", GetLastError());
+		return 1;
+	}
+
+	hPauseEventH = CreateEvent(NULL, TRUE, TRUE, TEXT("PauseEventH"));
+	if (hPauseEventH == NULL) {
+		printf("Erro ao criar evento hPauseEventH: %d\n", GetLastError());
+		return 1;
+	}
+
+	hPauseEventS = CreateEvent(NULL, TRUE, TRUE, TEXT("PauseEventS"));
+	if (hPauseEventS == NULL) {
+		printf("Erro ao criar evento hPauseEventS: %d\n", GetLastError());
+		return 1;
+	}
+
+	hPauseEventQ = CreateEvent(NULL, TRUE, TRUE, TEXT("PauseEventQ"));
+	if (hPauseEventQ == NULL) {
+		printf("Erro ao criar evento hPauseEventQ: %d\n", GetLastError());
+		return 1;
+	}
+
+	hRemoteEvent = CreateEvent(NULL, FALSE, FALSE, TEXT("RemoteEvent"));
+	if (hRemoteEvent == NULL) {
+			printf("Erro ao criar evento hRemoteEvent: %d\n", GetLastError());
+			return 1;
+	}
+
+	hFinishAllEvent = CreateEvent(NULL, TRUE, FALSE, TEXT("FinishAllEvent"));
+	if (hFinishAllEvent == NULL) {
+			printf("Erro ao criar evento hFinishAllEvent: %d\n", GetLastError());
+			return 1;
+	}
+	
+	
+	
 
 	HANDLE keyboardThread = CreateThread(NULL, 0, keyboard_control_thread, NULL, 0, &dwThreadIdKeyboard);
 	HANDLE hotboxThread = CreateThread(NULL, 0, generate_hotbox_message, NULL, 0, &dwThreadIdHotbox);
 	HANDLE remoteThread = CreateThread(NULL, 0, generate_remote_message, NULL, 0, &dwThreadIdRemote);
 	HANDLE sinalizacaoThread = CreateThread(NULL, 0, captura_sinalizacao, NULL, 0, &dwThreadSinalizacao);
 	HANDLE rodasQuentesThread = CreateThread(NULL, 0, captura_rodas_quentes, NULL, 0, &dwThreadRodasQuentes);
+	HANDLE hAllThreads[5] = { keyboardThread, hotboxThread, remoteThread, sinalizacaoThread, rodasQuentesThread };
 
 	if (hotboxThread) {
 		printf("Thread hotbox criada com ID = %0x \n", dwThreadIdHotbox);
@@ -585,24 +795,70 @@ int main() {
 	
 	if (keyboardThread) {
 		printf("Thread de controle do teclado criada com ID = %0x \n\n", dwThreadIdKeyboard);
-		WaitForSingleObject(keyboardThread, INFINITE);
+		
 	}
 
-	//print_circular_list(&cl); // Exibe o conteúdo da lista circular
+	//Espera todas as threads terminarem
+	WaitForMultipleObjects(5, hAllThreads, TRUE, INFINITE);
 
-	GetExitCodeThread(hotboxThread, &dwExitCode);
+	BOOL exitCodeHotbox = GetExitCodeThread(hotboxThread, &dwExitCode);
+	if (exitCodeHotbox == 0) {
+		printf("Falha ao encerrar thread Hotbox: %d\n", GetLastError());
+	}
+	else if (exitCodeHotbox == STILL_ACTIVE) {
+		printf("Falha ao encerrar thread Hotbox: Thread ATIVA\n");
+	}
+	else {
+		printf("Thread Hotbox ENCERRADA com sucesso\n");
+	}
 	CloseHandle(hotboxThread);
 
-	GetExitCodeThread(remoteThread, &dwExitCode);
+	BOOL exitCodeRemote = GetExitCodeThread(remoteThread, &dwExitCode);
+	if (exitCodeRemote == 0) {
+		printf("Falha ao encerrar thread Remote: %d\n", GetLastError());
+	}
+	else if (exitCodeRemote == STILL_ACTIVE) {
+		printf("Falha ao encerrar thread Remote: Thread ATIVA\n");
+	}
+	else {
+		printf("Thread Remote ENCERRADA com sucesso\n");
+	}
 	CloseHandle(remoteThread);
 	
-	GetExitCodeThread(sinalizacaoThread, &dwExitCode);
+	BOOL exitCodeSinalizacao = GetExitCodeThread(sinalizacaoThread, &dwExitCode);
+	if (exitCodeSinalizacao == 0) {
+		printf("Falha ao encerrar thread Sinalizacao: %d\n", GetLastError());
+	}
+	else if (exitCodeSinalizacao == STILL_ACTIVE) {
+		printf("Falha ao encerrar thread Sinalizacao: Thread ATIVA\n");
+	}
+	else {
+		printf("Thread Sinalizacao ENCERRADA com sucesso\n");
+	}
 	CloseHandle(sinalizacaoThread);
 
-	GetExitCodeThread(rodasQuentesThread, &dwExitCode);
+	BOOL exitCodeRodas = GetExitCodeThread(rodasQuentesThread, &dwExitCode);
+	if (exitCodeRodas == 0) {
+		printf("Falha ao encerrar thread Rodas: %d\n", GetLastError());
+	}
+	else if (exitCodeRodas == STILL_ACTIVE) {
+		printf("Falha ao encerrar thread Rodas: Thread ATIVA\n");
+	}
+	else {
+		printf("Thread Rodas ENCERRADA com sucesso\n");
+	}
 	CloseHandle(rodasQuentesThread);
 	
-	GetExitCodeThread(keyboardThread, &dwExitCode);
+	BOOL exitCodeKeyboard = GetExitCodeThread(keyboardThread, &dwExitCode);
+	if (exitCodeKeyboard == 0) {
+		printf("Falha ao encerrar thread Keybord: %d\n", GetLastError());
+	}
+	else if (exitCodeKeyboard == STILL_ACTIVE) {
+		printf("Falha ao encerrar thread Keybord: Thread ATIVA\n");
+	}
+	else {
+		printf("Thread Keybord ENCERRADA com sucesso\n");
+	}
 	CloseHandle(keyboardThread);
 
 	CloseHandle(sem_space); 

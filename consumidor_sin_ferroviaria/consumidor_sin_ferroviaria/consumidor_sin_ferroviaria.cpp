@@ -61,31 +61,38 @@ void consumeFirstMessage() {
 		processMessages(lines[0]); // Processa a primeira mensagem do arquivo
 
 		std::ofstream outfile(file_path);
-		for (size_t i = 1; i < lines.size(); i++) // Loop com o tipo size_t é o ideal para lidar com o tamanho de uma string em c++
+		for (size_t i = 1; i < lines.size(); i++) 
 			outfile << lines[i] << "\n";
 		
 		outfile.close();
-		semTxtSpace = OpenSemaphore(SEMAPHORE_MODIFY_STATE, NULL, TEXT("SemaforoEspacoDisco"));
-		if (semTxtSpace) {
-			ReleaseSemaphore(semTxtSpace, 1, NULL);
-			CloseHandle(semTxtSpace);
-		}
+		
+		ReleaseSemaphore(semTxtSpace, 1, NULL);
+		
+		
 	}
 }
 
 int main() {
 	hRemoteEvent = OpenEvent(SYNCHRONIZE, FALSE, TEXT("RemoteEvent"));
 	if (!hRemoteEvent) {
-		std::cerr << "Erro ao abrir evento do processo de exibir dados de sinalizacao ferroviaria." << std::endl;
+		printf("Erro ao abrir evento do processo de exibir dados de sinalizacao ferroviaria: %d\n", GetLastError());
+		return 1;
+	}
+
+	semTxtSpace = OpenSemaphore(SEMAPHORE_MODIFY_STATE, NULL, TEXT("SemaforoEspacoDisco"));
+	if (!semTxtSpace) {
+		printf("Erro ao abrir semaforo do processo de exibir dados de sinalizacao ferroviaria: %d\n", GetLastError());
 		return 1;
 	}
 
 	while (true) {
-		DWORD dwWaitResult = WaitForSingleObject(hRemoteEvent, INFINITE);
+		DWORD dwWaitResult = WaitForSingleObject(semTxtSpace, INFINITE);
 		if (dwWaitResult == WAIT_OBJECT_0) {
 			consumeFirstMessage();
 		}
 	}
+
 	CloseHandle(hRemoteEvent);
+	CloseHandle(semTxtSpace);
 	return 0;
 }
