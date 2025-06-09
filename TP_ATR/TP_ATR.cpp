@@ -757,7 +757,7 @@ int main() {
 	sem_space = CreateSemaphore(NULL, CAP_BUFF, CAP_BUFF, NULL);
 	sem_tipo[0] = CreateSemaphore(NULL, 0, CAP_BUFF, NULL);
 	sem_tipo[1] = CreateSemaphore(NULL, 0, CAP_BUFF, NULL);
-	sem_txtspace = CreateSemaphore(NULL, 200, 200, TEXT("SemaforoEspacoDisco"));
+	sem_txtspace = CreateSemaphoreA(NULL, 200, 200, "SemaforoEspacoDisco");
 
 	hPauseEventC = CreateEvent(
 		NULL,   // Atributos de segurança padrão

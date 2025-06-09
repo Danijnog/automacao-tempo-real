@@ -15,13 +15,13 @@ int main() {
 	std::ostringstream oss;
 	std::string message;
 	
-	hPauseEvent_Q = OpenEventA(EVENT_MODIFY_STATE, FALSE,  "PauseEventQ");
+	hPauseEvent_Q = OpenEventA(EVENT_ALL_ACCESS, FALSE,  "PauseEventQ");
 	if (hPauseEvent_Q == NULL) {
 		printf("Erro ao criar evento hPauseEventQ: %d\n", GetLastError());
 		//return 1;
 	}
 
-	hFinish_All_Event = OpenEventA(EVENT_MODIFY_STATE, FALSE, "FinishAllEvent");
+	hFinish_All_Event = OpenEventA(EVENT_ALL_ACCESS, FALSE, "FinishAllEvent");
 	if (hFinish_All_Event == NULL) {
 		printf("Erro ao criar evento hFinishAllEvent: %d\n", GetLastError());
 		//return 1;

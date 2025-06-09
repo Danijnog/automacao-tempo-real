@@ -77,13 +77,13 @@ void consumeFirstMessage() {
 int main() {
 	hRemoteEvent = OpenEvent(SYNCHRONIZE, FALSE, TEXT("RemoteEvent"));
 
-	hPauseEvent_S = OpenEventA(EVENT_MODIFY_STATE, FALSE, "PauseEventS");
+	hPauseEvent_S = OpenEventA(EVENT_ALL_ACCESS, FALSE, "PauseEventS");
 	if (hPauseEvent_S == NULL) {
 		printf("Erro ao criar evento hPauseEventS: %d\n", GetLastError());
 		//return 1;
 	}
 
-	hFinishAll_Event = OpenEventA(EVENT_MODIFY_STATE, FALSE, "FinishAllEvent");
+	hFinishAll_Event = OpenEventA(EVENT_ALL_ACCESS, FALSE, "FinishAllEvent");
 	if (hFinishAll_Event == NULL) {
 		printf("Erro ao criar evento hFinishAllEvent: %d\n", GetLastError());
 		//return 1;
@@ -97,7 +97,7 @@ int main() {
 		//return 1;
 	}
 
-	semTxtSpace = OpenSemaphore(SEMAPHORE_MODIFY_STATE, NULL, TEXT("SemaforoEspacoDisco"));
+	semTxtSpace = OpenSemaphoreA(SEMAPHORE_ALL_ACCESS, FALSE, "SemaforoEspacoDisco");
 	if (!semTxtSpace) {
 		printf("Erro ao abrir semaforo do processo de exibir dados de sinalizacao ferroviaria: %d\n", GetLastError());
 		//return 1;
@@ -110,7 +110,7 @@ int main() {
 			break;
 		}
 		if ((finish - WAIT_OBJECT_0) != 0 && (finish - WAIT_OBJECT_0) != 1) {
-			printf("Visualizacao de Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+			printf("Visualizacao de Sinalizacao1: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
 			//return 1;
 		}
 		
@@ -120,7 +120,7 @@ int main() {
 			break;
 		}
 		if ((dwWaitResult - WAIT_OBJECT_0) != 0 && (dwWaitResult - WAIT_OBJECT_0) != 1) {
-			printf("Visualizacao de Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+			printf("Visualizacao de Sinalizacao2: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
 			//return 1;
 		}
 		if (dwWaitResult - WAIT_OBJECT_0 == 1) {
