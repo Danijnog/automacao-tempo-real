@@ -13,7 +13,7 @@
 #include <vector>
 #include <fstream>
 
-#define CAP_BUFF 20         // capacidade do buffer circular, 200 mensagens
+#define CAP_BUFF 200         // capacidade do buffer circular, 200 mensagens
 
 // Variável global para NSEQ do hotbox e da remota
 static LONG nseq_counter_hotbox = 0;
@@ -34,7 +34,7 @@ Node* head = NULL;         // Último elemento da lista circular (head->next é o 
 
 HANDLE sem_tipo[2];        // um semáforo por tipo de mensagem para indicar que há mensagem do respectivo tipo
 HANDLE sem_space;          // conta nós livres no buffer (0–200)
-HANDLE sem_txtspace;      // conta espaço livre no arquivo em disco (txt) (0-200)
+
 
 HANDLE hRemoteEvent; // Handle para sinalizar que há mensagens no arquivo de disco para a tarefa 4
 HANDLE hFinishAllEvent; // Evento para encerrar todas as threads do programa
@@ -105,7 +105,7 @@ void createProcess(const char* path) {
 		return;
 	}
 	else {
-		//std::cout << "Processo criado com PID: " << pi->dwProcessId << " a partir do executavel: " << exec << std::endl;
+		
 		std::cout << "Processo criado com PID: " << pi.dwProcessId << " a partir do executavel: " << exec << std::endl;
 	}
 
@@ -113,33 +113,6 @@ void createProcess(const char* path) {
 	CloseHandle(pi.hThread);
 }
 
-/*
-static void print_circular_list(CircularList *circular_list) 
-{
-	
-	// Exibe o conteúdo da lista circular.
-	
-	WaitForSingleObject(circular_list->hMutex, INFINITE);
-
-	printf("\nTamanho da lista circular: %d\n", circular_list->tam);
-
-	Node* node = circular_list->begin;
-	if (node == NULL) {
-		printf("Lista circular vazia.\n");
-	}
-
-	else {
-		int i = 0;
-		do {
-			printf("[%02d]: Mensagem: %s\n", i++, node->data.content);
-			node = node->next;
-
-		} while (node != circular_list->begin);
-	}
-
-	ReleaseMutex(circular_list->hMutex);
-}
-*/
 static void deposit_messages(std::string Mensagem, int tipo) {
 	
 	// Aloca a mensagem em um nó livre
@@ -304,7 +277,7 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 	std::string msg;
 	std::ostringstream mensagem;
 	int threadBloqueada = -1;
-	int counter = 0;
+	//int counter = 0;  //usado para imprimir mensagens periodicamente
 
 	while (true) {
 		// Checa se deve encerrar ou pausar
@@ -380,6 +353,9 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 
 			
 			deposit_messages(msg, 1); // Deposita a mensagem na lista circular
+
+			/*
+			 //Imprime uma mensagem salva na lista a cada 50 mensagens salvas
 			if (counter % 50 == 1) {
 				printf("Hotbox message: %s\n", msg.c_str());
 				counter = 0;
@@ -387,11 +363,11 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 			else {
 				counter += 1;
 			}
+			*/
 		}
 
 	}
 	CloseHandle(hEvent);
-	std::cout << "FIM Geracao de mensagens Hotbox " << std::endl;
 	return 0;
 }
 
@@ -407,7 +383,7 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 	std::string msg;
 	std::ostringstream mensagem;
 	int threadBloqueada = -1;
-	int counter = 0;
+	//int counter = 0;  //usado para imprimir mensagens periodicamente
 
 	while (true) {
 
@@ -483,7 +459,7 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 			}
 			if (dwWaitResult2 - WAIT_OBJECT_0 != 0 && dwWaitResult2 - WAIT_OBJECT_0 != 1) {
 				printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
-				return 1;
+				
 			}
 			InterlockedDecrement(&sem_space_counter);
 
@@ -493,19 +469,22 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 			}
 			
 
-			//printf("Remote message: %s\n", msg.c_str());
+			;
 			deposit_messages(msg, 0); // Deposita a mensagem na lista circular
+			
+			/*
+			//Imprime uma mensagem a cada 50 
 			if (counter % 50 == 1) {
-				printf("Hotbox message: %s\n", msg.c_str());
+				printf("Remote message: %s\n", msg.c_str());
 				counter = 0;
 			}
 			else {
 				counter += 1;
 			}
+			*/
 		}
 	}
 	CloseHandle(hEvent);
-	std::cout << "FIM Geracao de mensagens das Remotas" << std::endl;
 	return 0;
 
 }
@@ -518,11 +497,10 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 	std::vector<std::string> msgVector;   // Vetor para armazenar a mensagem
 	int lineCount = 0;
 	HANDLE hExecuting[2] = { hFinishAllEvent, hPauseEventD };
-	HANDLE hMultObj2[2] = { hFinishAllEvent, sem_txtspace };
 	HANDLE hMultObj[2] = { hFinishAllEvent, sem_tipo[0] };
 	
 
-	while (TRUE) {                      //Substituir True por evento de bloqueio dessa thread                   ERRO
+	while (TRUE) {                      
 		
 		// Checa se deve encerrar ou pausar
 		DWORD finish = WaitForMultipleObjects(2, hExecuting, FALSE, INFINITE);
@@ -532,7 +510,7 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 		}
 		if ((finish - WAIT_OBJECT_0) != 0 && (finish - WAIT_OBJECT_0) != 1) {
 			printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
-			return 1;
+			
 		}
 
 
@@ -545,7 +523,7 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 		}
 		if ((dwWaitResult2 - WAIT_OBJECT_0) != 0 && (dwWaitResult2 - WAIT_OBJECT_0) != 1) {
 			printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
-			return 1;
+			
 		}
 
 		// Espera permissão para acessar a lista circular
@@ -594,50 +572,13 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 		// Verifica o valor de DIAG e dá destino à mensagem
 		if (std::stoi(msgVector[2]) == 1) {
 
-
 			// Enviar mensagem para tarefa 5 por pipes/mailslots
-
-
-			printf("DIAG = %s, ", msgVector[2].c_str());
 			printf("Mensagem de Sinalizacao enviada por pipes para visualizacao de rodas quentes: %s\n", alvo->msg.c_str());
 		}
 		else {
 			
-			DWORD dwWaitResult = WaitForSingleObject(sem_txtspace, 0); // Espera espaço no disco (pode até 200 mensagens no máximo) (Decrementa valor do semáforo)
-			DWORD dwWaitResult2 = 1;
-			if (dwWaitResult == WAIT_TIMEOUT) {
-				std::cout << "Arquivo cheio. Captura de dados de sinalizacao bloqueada aguardando espaço livre" << std::endl;
-				dwWaitResult2 = WaitForMultipleObjects(2, hMultObj2, FALSE, INFINITE); //Espera comando para finalizar ou espaco no disco
-				if ((dwWaitResult2 - WAIT_OBJECT_0) == 0) {
-					std::cout << "FINISH 3 SINALIZACAO " << std::endl;
-					break;
-				}
-				if ((dwWaitResult2 - WAIT_OBJECT_0) != 0 && (dwWaitResult2 - WAIT_OBJECT_0) != 1) {
-					printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
-					return 1;
-				}
-			}
-
-			EnterCriticalSection(&file_access);
-			
-			if ((dwWaitResult == WAIT_OBJECT_0) || (dwWaitResult2 - WAIT_OBJECT_0) == 1) {
-				
-				// Depositar mensagem no disco
-				std::ofstream outfile("sinalizacao.txt", std::ios::app);
-				if (outfile.is_open()) {
-					outfile << alvo->msg.c_str() << std::endl;
-					outfile.close();
-					printf("Mensagem depositada no disco: %s\n", alvo->msg.c_str());
-					SetEvent(hRemoteEvent); // Sinaliza que há mensagem no arquivo de disco
-				}
-				else {
-					printf("Erro ao abrir o arquivo de disco para escrita.\n");
-				}
-			}
-			else
-				printf("Erro ao esperar por espaço no disco: %d\n", GetLastError());
-
-			LeaveCriticalSection(&file_access);
+			//Depositar mensagem no disco
+			printf("Mensagem de Sinalizacao salva no disco: %s\n", alvo->msg.c_str());
 
 		}
 
@@ -647,11 +588,10 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 
 		// Devolve o nó à lista de nós livres e indica espaço livre no buffer
 		recycle_node(alvo);
-		ReleaseSemaphore(sem_space, 1, NULL);
 		InterlockedIncrement(&sem_space_counter);
 
 	}
-	std::cout << "FIM Sinalizacao" << std::endl;
+	
 	return 0;
 }
 
@@ -726,7 +666,7 @@ DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de ro
 
 
 		// Enviar mensagem para tarefa 5 por pipes/mailslots
-		printf("Mensagem de rodas quentes enviada por pipes: %s\n", alvo->msg.c_str());
+		printf("Mensagem de Rodas quentes enviada por pipes: %s\n", alvo->msg.c_str());
 
 
 		// Devolve o nó à lista de nós livres e indica espaço livre no buffer
@@ -734,7 +674,7 @@ DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de ro
 		ReleaseSemaphore(sem_space, 1, NULL);
 		InterlockedIncrement(&sem_space_counter);
 	}
-	std::cout << "FIM Rodas quentes" << std::endl;
+	
 	return 0;
 }
 
@@ -757,7 +697,6 @@ int main() {
 	sem_space = CreateSemaphore(NULL, CAP_BUFF, CAP_BUFF, NULL);
 	sem_tipo[0] = CreateSemaphore(NULL, 0, CAP_BUFF, NULL);
 	sem_tipo[1] = CreateSemaphore(NULL, 0, CAP_BUFF, NULL);
-	sem_txtspace = CreateSemaphoreA(NULL, 200, 200, "SemaforoEspacoDisco");
 
 	hPauseEventC = CreateEvent(
 		NULL,   // Atributos de segurança padrão
@@ -819,8 +758,7 @@ int main() {
 	// Criação dos processos de exibição dos dados de sinalização ferroviária e de rodas quentes
 	createProcess("../x64/Debug/consumidor_sin_ferroviaria.exe");
 	createProcess("../x64/Debug/consumidor_rodas_quentes.exe");
-	//createProcess("../x64/Debug/consumidor_sin_ferroviaria.exe", &piFerroviaria);
-	//createProcess("../x64/Debug/consumidor_rodas_quentes.exe", &piRodas);
+	
 	HANDLE hAllThreads[5] = { keyboardThread, hotboxThread, remoteThread, sinalizacaoThread, rodasQuentesThread };
 
 	if (hotboxThread) {
