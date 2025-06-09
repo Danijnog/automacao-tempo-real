@@ -5,14 +5,40 @@
 #include <windows.h>
 #include <sstream>
 
+HANDLE hPauseEvent_Q; // Handle para controle de pausa/continuação
+HANDLE hFinish_All_Event; // Evento para encerrar todas as threads do programa
+
 int main() {
 	SYSTEMTIME st;
 	GetLocalTime(&st);
 	std::cout << "Visualizacao de rodas quentes - TESTE" << std::endl;
 	std::ostringstream oss;
 	std::string message;
+	
+	hPauseEvent_Q = OpenEventA(EVENT_MODIFY_STATE, FALSE,  "PauseEventQ");
+	if (hPauseEvent_Q == NULL) {
+		printf("Erro ao criar evento hPauseEventQ: %d\n", GetLastError());
+		//return 1;
+	}
 
-	while (1) {
+	hFinish_All_Event = OpenEventA(EVENT_MODIFY_STATE, FALSE, "FinishAllEvent");
+	if (hFinish_All_Event == NULL) {
+		printf("Erro ao criar evento hFinishAllEvent: %d\n", GetLastError());
+		//return 1;
+	}
+	
+	HANDLE h_Executing[2] = { hFinish_All_Event, hPauseEvent_Q };
+
+	while (TRUE) {
+		DWORD finish = WaitForMultipleObjects(2, h_Executing, FALSE, INFINITE);
+		if ((finish - WAIT_OBJECT_0) == 0) {
+			std::cout << "FINISH 1 RODAS " << std::endl;
+			break;
+		}
+		if ((finish - WAIT_OBJECT_0) != 0 && (finish - WAIT_OBJECT_0) != 1) {
+			printf("Visualizacao de Rodas Quentes: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+			//return 1;
+		}
 		oss << st.wHour << ":" << st.wMinute << ":" << st.wSecond << ":" << st.wMilliseconds
 			<< " NSEQ: " << " ######## " << " REMOTA " << " ## " <<
 			" FALHA DE HARDWARE ";
@@ -30,5 +56,9 @@ int main() {
 		oss.clear();
 		Sleep(3000);
 	}
+
+	CloseHandle(hPauseEvent_Q);
+	CloseHandle(hFinish_All_Event);
+	return 0;
 }
 

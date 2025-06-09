@@ -7,6 +7,8 @@
 
 HANDLE hRemoteEvent;
 HANDLE semTxtSpace;
+HANDLE hPauseEvent_S; // Handle para controle de pausa/continuação
+HANDLE hFinishAll_Event; // Evento para encerrar todas as threads do programa
 
 // Estado do sensor: devemos ter pelo menos 20 estados reais aleatórios possíveis
 std::vector<std::string> states = {
@@ -74,25 +76,62 @@ void consumeFirstMessage() {
 
 int main() {
 	hRemoteEvent = OpenEvent(SYNCHRONIZE, FALSE, TEXT("RemoteEvent"));
+
+	hPauseEvent_S = OpenEventA(EVENT_MODIFY_STATE, FALSE, "PauseEventS");
+	if (hPauseEvent_S == NULL) {
+		printf("Erro ao criar evento hPauseEventS: %d\n", GetLastError());
+		//return 1;
+	}
+
+	hFinishAll_Event = OpenEventA(EVENT_MODIFY_STATE, FALSE, "FinishAllEvent");
+	if (hFinishAll_Event == NULL) {
+		printf("Erro ao criar evento hFinishAllEvent: %d\n", GetLastError());
+		//return 1;
+	}
+
+	HANDLE hExecuting_[2] = { hFinishAll_Event, hPauseEvent_S };
+	HANDLE hMult_Obj[2] = { hFinishAll_Event, semTxtSpace };
+
 	if (!hRemoteEvent) {
 		printf("Erro ao abrir evento do processo de exibir dados de sinalizacao ferroviaria: %d\n", GetLastError());
-		return 1;
+		//return 1;
 	}
 
 	semTxtSpace = OpenSemaphore(SEMAPHORE_MODIFY_STATE, NULL, TEXT("SemaforoEspacoDisco"));
 	if (!semTxtSpace) {
 		printf("Erro ao abrir semaforo do processo de exibir dados de sinalizacao ferroviaria: %d\n", GetLastError());
-		return 1;
+		//return 1;
 	}
 
 	while (true) {
-		DWORD dwWaitResult = WaitForSingleObject(semTxtSpace, INFINITE);
-		if (dwWaitResult == WAIT_OBJECT_0) {
-			consumeFirstMessage();
+		DWORD finish = WaitForMultipleObjects(2, hExecuting_, FALSE, INFINITE);
+		if ((finish - WAIT_OBJECT_0) == 0) {
+			std::cout << "FINISH 1 RODAS " << std::endl;
+			break;
+		}
+		if ((finish - WAIT_OBJECT_0) != 0 && (finish - WAIT_OBJECT_0) != 1) {
+			printf("Visualizacao de Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+			//return 1;
+		}
+		
+		DWORD dwWaitResult = WaitForMultipleObjects(2, hMult_Obj, FALSE, INFINITE);
+		if ((dwWaitResult - WAIT_OBJECT_0) == 0) {
+			std::cout << "FINISH 1 RODAS " << std::endl;
+			break;
+		}
+		if ((dwWaitResult - WAIT_OBJECT_0) != 0 && (dwWaitResult - WAIT_OBJECT_0) != 1) {
+			printf("Visualizacao de Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+			//return 1;
+		}
+		if (dwWaitResult - WAIT_OBJECT_0 == 1) {
+			//consumeFirstMessage();
+			std::cout << "Consumi mensagem" << std::endl;
 		}
 	}
 
 	CloseHandle(hRemoteEvent);
 	CloseHandle(semTxtSpace);
+	CloseHandle(hPauseEvent_S);
+	CloseHandle(hFinishAll_Event);
 	return 0;
 }

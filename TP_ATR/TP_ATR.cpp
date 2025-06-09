@@ -85,6 +85,33 @@ static void msgToVector(Node* n, std::vector<std::string>& msgVector) {  // Tran
 	}
 }
 
+void createProcess(const char* path) {
+	
+	//Função para criar processos a partir do executável passado como parâmetro para a função.
+	
+	STARTUPINFOA si;
+	PROCESS_INFORMATION pi;
+
+	ZeroMemory(&si, sizeof(si)); // Zera a estrutura
+	si.cb = sizeof(si);
+	ZeroMemory(&pi, sizeof(pi));
+	ZeroMemory(&pi, sizeof(pi));
+
+	char exec[50];
+	strcpy_s(exec, path);
+
+	if (!CreateProcessA(NULL, exec, NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+		std::cerr << "Erro ao criar processo: " << path << " Código: " << GetLastError() << std::endl;
+		return;
+	}
+	else {
+		//std::cout << "Processo criado com PID: " << pi->dwProcessId << " a partir do executavel: " << exec << std::endl;
+		std::cout << "Processo criado com PID: " << pi.dwProcessId << " a partir do executavel: " << exec << std::endl;
+	}
+
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+}
 
 /*
 static void print_circular_list(CircularList *circular_list) 
@@ -262,6 +289,7 @@ DWORD WINAPI keyboard_control_thread(LPVOID) {
 		
 
 	}
+	
 	return 0;
 }
 
@@ -276,6 +304,7 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 	std::string msg;
 	std::ostringstream mensagem;
 	int threadBloqueada = -1;
+	int counter = 0;
 
 	while (true) {
 		// Checa se deve encerrar ou pausar
@@ -349,8 +378,15 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 				threadBloqueada = 0;
 			}
 
-			//printf("Hotbox message: %s\n", msg.c_str());
+			
 			deposit_messages(msg, 1); // Deposita a mensagem na lista circular
+			if (counter % 50 == 1) {
+				printf("Hotbox message: %s\n", msg.c_str());
+				counter = 0;
+			}
+			else {
+				counter += 1;
+			}
 		}
 
 	}
@@ -371,7 +407,7 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 	std::string msg;
 	std::ostringstream mensagem;
 	int threadBloqueada = -1;
-
+	int counter = 0;
 
 	while (true) {
 
@@ -459,7 +495,13 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 
 			//printf("Remote message: %s\n", msg.c_str());
 			deposit_messages(msg, 0); // Deposita a mensagem na lista circular
-
+			if (counter % 50 == 1) {
+				printf("Hotbox message: %s\n", msg.c_str());
+				counter = 0;
+			}
+			else {
+				counter += 1;
+			}
 		}
 	}
 	CloseHandle(hEvent);
@@ -515,6 +557,8 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 			}
 			else {
 				cursor = NULL;
+				LeaveCriticalSection(&cs_list);
+				continue;
 			}
 		}
 
@@ -522,13 +566,9 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 		while (cursor && cursor->msg.length() != 40)  
 			cursor = cursor->next;
 
-		if (!cursor) {                   // Se lista vazia 
-			LeaveCriticalSection(&cs_list);
-			continue;
-		}
 
 		Node* alvo = cursor;             // Nó correspondente à mensagem a ser processada
-		cursor = cursor->next;           // Avança para ser usado na próxima busca
+		cursor = NULL;                   // Reseta para ser usado na próxima busca
 
 
 		// Remoção do nó da lista circular 
@@ -590,8 +630,9 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 					printf("Mensagem depositada no disco: %s\n", alvo->msg.c_str());
 					SetEvent(hRemoteEvent); // Sinaliza que há mensagem no arquivo de disco
 				}
-				else
+				else {
 					printf("Erro ao abrir o arquivo de disco para escrita.\n");
+				}
 			}
 			else
 				printf("Erro ao esperar por espaço no disco: %d\n", GetLastError());
@@ -654,19 +695,17 @@ DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de ro
 			}
 			else { 
 				cursor = NULL;
+				LeaveCriticalSection(&cs_list);
+				continue;
 			}  
 		}
 
 		while (cursor && cursor->msg.length() != 34)  // Percorre a lista até encontrar uma mensagem de 34 char
 			cursor = cursor->next;
 
-		if (!cursor) {                   // lista vazia 
-			LeaveCriticalSection(&cs_list);
-			continue;
-		}
 
 		Node* alvo = cursor;             // Nó correspondente à mensagem a ser processada
-		cursor = cursor->next;           // Avança para ser usado na próxima busca
+		cursor = NULL;           // Avança para ser usado na próxima busca
 
 
 		// Remoção do nó da lista circular 
@@ -737,31 +776,31 @@ int main() {
 		return 1;
 	}
 
-	hPauseEventH = CreateEvent(NULL, TRUE, TRUE, TEXT("PauseEventH"));
+	hPauseEventH = CreateEventA(NULL, TRUE, TRUE, "PauseEventH");
 	if (hPauseEventH == NULL) {
 		printf("Erro ao criar evento hPauseEventH: %d\n", GetLastError());
 		return 1;
 	}
 
-	hPauseEventS = CreateEvent(NULL, TRUE, TRUE, TEXT("PauseEventS"));
+	hPauseEventS = CreateEventA(NULL, TRUE, TRUE, "PauseEventS");
 	if (hPauseEventS == NULL) {
 		printf("Erro ao criar evento hPauseEventS: %d\n", GetLastError());
 		return 1;
 	}
 
-	hPauseEventQ = CreateEvent(NULL, TRUE, TRUE, TEXT("PauseEventQ"));
+	hPauseEventQ = CreateEventA(NULL, TRUE, TRUE, "PauseEventQ");
 	if (hPauseEventQ == NULL) {
 		printf("Erro ao criar evento hPauseEventQ: %d\n", GetLastError());
 		return 1;
 	}
 
-	hRemoteEvent = CreateEvent(NULL, FALSE, FALSE, TEXT("RemoteEvent"));
+	hRemoteEvent = CreateEventA(NULL, FALSE, FALSE, "RemoteEvent");
 	if (hRemoteEvent == NULL) {
 			printf("Erro ao criar evento hRemoteEvent: %d\n", GetLastError());
 			return 1;
 	}
 
-	hFinishAllEvent = CreateEvent(NULL, TRUE, FALSE, TEXT("FinishAllEvent"));
+	hFinishAllEvent = CreateEventA(NULL, TRUE, FALSE, "FinishAllEvent");
 	if (hFinishAllEvent == NULL) {
 			printf("Erro ao criar evento hFinishAllEvent: %d\n", GetLastError());
 			return 1;
@@ -775,6 +814,13 @@ int main() {
 	HANDLE remoteThread = CreateThread(NULL, 0, generate_remote_message, NULL, 0, &dwThreadIdRemote);
 	HANDLE sinalizacaoThread = CreateThread(NULL, 0, captura_sinalizacao, NULL, 0, &dwThreadSinalizacao);
 	HANDLE rodasQuentesThread = CreateThread(NULL, 0, captura_rodas_quentes, NULL, 0, &dwThreadRodasQuentes);
+	PROCESS_INFORMATION piFerroviaria;
+	PROCESS_INFORMATION piRodas;
+	// Criação dos processos de exibição dos dados de sinalização ferroviária e de rodas quentes
+	createProcess("../x64/Debug/consumidor_sin_ferroviaria.exe");
+	createProcess("../x64/Debug/consumidor_rodas_quentes.exe");
+	//createProcess("../x64/Debug/consumidor_sin_ferroviaria.exe", &piFerroviaria);
+	//createProcess("../x64/Debug/consumidor_rodas_quentes.exe", &piRodas);
 	HANDLE hAllThreads[5] = { keyboardThread, hotboxThread, remoteThread, sinalizacaoThread, rodasQuentesThread };
 
 	if (hotboxThread) {
