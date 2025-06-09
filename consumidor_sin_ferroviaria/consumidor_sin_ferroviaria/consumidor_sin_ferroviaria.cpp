@@ -46,7 +46,7 @@ void consumeFirstMessage() {
 	/*
 	* Processa o arquivo em disco, consome a primeira mensagem no arquivo e reescreve as outras mensagens restantes no arquivo.
 	*/
-	std::string file_path = "../../TP_ATR/sinalizacao.txt";
+	std::string file_path = "sinalizacao.txt";
 	std::vector<std::string> lines;
 	std::string line;
 	std::ifstream infile(file_path);
@@ -89,6 +89,12 @@ int main() {
 		//return 1;
 	}
 
+	semTxtSpace = OpenSemaphoreA(SEMAPHORE_ALL_ACCESS, FALSE, "SemaforoEspacoDisco");
+	if (!semTxtSpace) {
+		printf("Erro ao abrir semaforo do processo de exibir dados de sinalizacao ferroviaria: %d\n", GetLastError());
+		//return 1;
+	}
+
 	HANDLE hExecuting_[2] = { hFinishAll_Event, hPauseEvent_S };
 	HANDLE hMult_Obj[2] = { hFinishAll_Event, semTxtSpace };
 
@@ -97,11 +103,6 @@ int main() {
 		//return 1;
 	}
 
-	semTxtSpace = OpenSemaphoreA(SEMAPHORE_ALL_ACCESS, FALSE, "SemaforoEspacoDisco");
-	if (!semTxtSpace) {
-		printf("Erro ao abrir semaforo do processo de exibir dados de sinalizacao ferroviaria: %d\n", GetLastError());
-		//return 1;
-	}
 
 	while (true) {
 		DWORD finish = WaitForMultipleObjects(2, hExecuting_, FALSE, INFINITE);
@@ -124,8 +125,9 @@ int main() {
 			//return 1;
 		}
 		if (dwWaitResult - WAIT_OBJECT_0 == 1) {
-			//consumeFirstMessage();
-			std::cout << "Consumi mensagem" << std::endl;
+			if (WaitForSingleObject(hRemoteEvent, INFINITE) == WAIT_OBJECT_0)
+				consumeFirstMessage();
+			//std::cout << "Consumi mensagem" << std::endl;
 		}
 	}
 
