@@ -26,14 +26,13 @@ typedef struct Node {
 } Node;
 
 CRITICAL_SECTION cs_list;  // protege lista e free_list
-CRITICAL_SECTION file_access; // Protege acesso ao arquivo de log (txt)
 
 Node  pool[CAP_BUFF];      // bloco de nós pré-alocado
 Node* free_list = NULL;    // nós livres
 Node* head = NULL;         // Último elemento da lista circular (head->next é o 1.º e tb o 1° que deve ser consumido)
 
-HANDLE sem_tipo[2];        // um semáforo por tipo de mensagem para indicar que há mensagem do respectivo tipo
-HANDLE sem_space;          // conta nós livres no buffer (0–200)
+HANDLE sem_tipo[2];        // Um semáforo por tipo de mensagem para indicar que há mensagem do respectivo tipo
+HANDLE sem_space;          // Conta nós livres no buffer (0–200)
 
 
 HANDLE hRemoteEvent; // Handle para sinalizar que há mensagens no arquivo de disco para a tarefa 4
@@ -43,6 +42,7 @@ HANDLE hPauseEventD; // Handle para controle de pausa/continuação
 HANDLE hPauseEventH; // Handle para controle de pausa/continuação
 HANDLE hPauseEventS; // Handle para controle de pausa/continuação
 HANDLE hPauseEventQ; // Handle para controle de pausa/continuação
+HANDLE hMutexFile; // Handle para exclusão mútua ao acesso do arquivo de log (txt)
 
 
 // Inicialização da lista
@@ -157,6 +157,52 @@ std::string generate_random_id() {
 	return id.str();
 
 }
+
+void initialize_circular_file(std::string file_path) {
+	/*
+	* Inicializar o arquivo circular txt para armazenamento de mensagens.
+	*/
+	std::ofstream file(file_path, std::ios::binary | std::ios::trunc);
+	int head = 0, tail = 0;
+
+	file.write(reinterpret_cast<char*>(&head), sizeof(int));
+	file.write(reinterpret_cast<char*>(&tail), sizeof(int));
+
+	std::string empty(40, '\0');
+	for (int i = 0; i < CAP_BUFF; i++)
+		file.write(empty.c_str(), 40);
+
+	file.close();
+}
+
+void write_messages(std::string file_path, const std::string& msg) {
+	/*
+	* Escreve no arquivo circular txt as mensagens.
+	*/
+	const int HEADER_SIZE = sizeof(int) * 2;
+	std::fstream file(file_path, std::ios::binary | std::ios::in | std::ios::out); // Modos binários, leitura e escrita
+	int head, tail;
+	file.read(reinterpret_cast<char*>(&head), sizeof(int));
+	file.read(reinterpret_cast<char*>(&tail), sizeof(int));
+
+	int next_tail = (tail + 1) % CAP_BUFF;
+	if (next_tail == head) {
+		std::cerr << "Buffer cheio, não é possível escrever a mensagem." << std::endl;
+		file.close();
+		return;
+	}
+
+	file.seekp(HEADER_SIZE + tail * 40); // Seekp posiciona o ponteiro de escrita no arquivo
+	std::string fixed_msg = msg;
+	fixed_msg.resize(40, '\0');
+	file.write(fixed_msg.c_str(), 40);
+
+	file.seekp(sizeof(int)); // Move o ponteiro de escrita do arquivo
+	file.write(reinterpret_cast<const char*>(&next_tail), sizeof(int));
+	file.close();
+}
+
+
 
 DWORD WINAPI keyboard_control_thread(LPVOID) {
 	/*
@@ -512,8 +558,6 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 			printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
 			
 		}
-
-
 		
 		// Aguarda comando de finalizar ou existir mensagem do meu tipo 
 		DWORD dwWaitResult2 = WaitForMultipleObjects(2, hMultObj, FALSE, INFINITE);
@@ -576,10 +620,14 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 			printf("Mensagem de Sinalizacao enviada por pipes para visualizacao de rodas quentes: %s\n", alvo->msg.c_str());
 		}
 		else {
-			
 			//Depositar mensagem no disco
-			printf("Mensagem de Sinalizacao salva no disco: %s\n", alvo->msg.c_str());
-
+			DWORD dwWaitResultMutex = WaitForSingleObject(hMutexFile, INFINITE);
+			if (dwWaitResultMutex == WAIT_OBJECT_0) {
+				printf("Mensagem de Sinalizacao salva no disco: %s\n", alvo->msg.c_str());
+				write_messages("sinalizacao.txt", alvo->msg);
+				ReleaseMutex(hMutexFile);
+				SetEvent(hRemoteEvent);
+			}
 		}
 
 		// Esvazia o vetor
@@ -689,14 +737,17 @@ int main() {
 
 	SetConsoleOutputCP(CP_ACP);
 	InitializeCriticalSection(&cs_list);
-	InitializeCriticalSection(&file_access);
 	initialize_circular_list();
+	initialize_circular_file("sinalizacao.txt");
 
+	hMutexFile = CreateMutex(NULL, FALSE, TEXT("MutexFile"));
+	
 	//sem_space inicia em 200 => 200 vagas disponíveis           
 	//sem_tipo[k] inicia em 0  => nenhuma mensagem disponivel para leitura     
 	sem_space = CreateSemaphore(NULL, CAP_BUFF, CAP_BUFF, NULL);
 	sem_tipo[0] = CreateSemaphore(NULL, 0, CAP_BUFF, NULL);
 	sem_tipo[1] = CreateSemaphore(NULL, 0, CAP_BUFF, NULL);
+
 
 	hPauseEventC = CreateEvent(
 		NULL,   // Atributos de segurança padrão
@@ -733,7 +784,7 @@ int main() {
 		return 1;
 	}
 
-	hRemoteEvent = CreateEventA(NULL, FALSE, FALSE, "RemoteEvent");
+	hRemoteEvent = CreateEvent(NULL, FALSE, FALSE, TEXT("RemoteEvent"));
 	if (hRemoteEvent == NULL) {
 			printf("Erro ao criar evento hRemoteEvent: %d\n", GetLastError());
 			return 1;
@@ -848,6 +899,8 @@ int main() {
 	CloseHandle(sem_space); 
 	CloseHandle(sem_tipo[0]); 
 	CloseHandle(sem_tipo[1]);
+	CloseHandle(hMutexFile);
+	CloseHandle(hRemoteEvent);
 	DeleteCriticalSection(&cs_list);
 
 	return EXIT_SUCCESS;
