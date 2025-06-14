@@ -175,7 +175,7 @@ void initialize_circular_file(std::string file_path) {
 	file.close();
 }
 
-void write_messages(std::string file_path, const std::string& msg) {
+int write_messages(std::string file_path, const std::string& msg) {
 	/*
 	* Escreve no arquivo circular txt as mensagens.
 	*/
@@ -187,9 +187,9 @@ void write_messages(std::string file_path, const std::string& msg) {
 
 	int next_tail = (tail + 1) % CAP_BUFF;
 	if (next_tail == head) {
-		std::cerr << "Buffer cheio, não é possível escrever a mensagem." << std::endl;
+		std::cout << "Buffer cheio, não é possível escrever a mensagem." << std::endl;
 		file.close();
-		return;
+		return 1;
 	}
 
 	file.seekp(HEADER_SIZE + tail * 40); // Seekp posiciona o ponteiro de escrita no arquivo
@@ -200,6 +200,7 @@ void write_messages(std::string file_path, const std::string& msg) {
 	file.seekp(sizeof(int)); // Move o ponteiro de escrita do arquivo
 	file.write(reinterpret_cast<const char*>(&next_tail), sizeof(int));
 	file.close();
+	return 0;
 }
 
 
@@ -301,7 +302,7 @@ DWORD WINAPI keyboard_control_thread(LPVOID) {
 				printf("Esc pressionado. Encerrando...\n");
 				return 0;
 			default:
-				std::cout << "Entrada inválida!" << std::endl;
+				std::cout << "Entrada invalida!" << std::endl;
 				
 		}
 
@@ -623,8 +624,10 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 			//Depositar mensagem no disco
 			DWORD dwWaitResultMutex = WaitForSingleObject(hMutexFile, INFINITE);
 			if (dwWaitResultMutex == WAIT_OBJECT_0) {
-				printf("Mensagem de Sinalizacao salva no disco: %s\n", alvo->msg.c_str());
-				write_messages("sinalizacao.txt", alvo->msg);
+				int resultado = write_messages("sinalizacao.txt", alvo->msg);
+				if (resultado == 0) {
+					printf("Mensagem de Sinalizacao salva no disco: %s\n", alvo->msg.c_str());
+				}
 				ReleaseMutex(hMutexFile);
 				SetEvent(hRemoteEvent);
 			}
