@@ -72,6 +72,7 @@ static void recycle_node(Node* n)
 {
 	// Devolve nó à free_list para reutilização futura 
 	EnterCriticalSection(&cs_list);
+	n->msg = "";
 	n->next = free_list;
 	free_list = n;
 	LeaveCriticalSection(&cs_list);
@@ -84,6 +85,38 @@ static void msgToVector(Node* n, std::vector<std::string>& msgVector) {  // Tran
 		msgVector.push_back(campo);
 	}
 }
+
+void imprime_lista_circular() {  
+	
+	// Imprime todo o conteudo da lista circular no console principal e esvazia a lista
+
+	std::cout << "Impressao da lista:" << std::endl;
+
+	Node* cursor = NULL;
+
+	while (head != NULL) {
+		EnterCriticalSection(&cs_list);  // Espera permissão para acessar a lista circular
+		cursor = head->next;
+		std::cout << cursor->msg << std::endl;
+
+		// Remoção do nó da lista circular 
+		Node* prev = head;
+		while (prev->next != cursor) prev = prev->next;
+
+		if (cursor == head) {             // Ajusta head se ela estiver sendo removida 
+			if (cursor->next == cursor) {
+				head = NULL;
+				cursor = NULL;
+			}
+			else {
+				head = prev;
+			}
+		}
+		prev->next = cursor->next;        // desvincula alvo
+		LeaveCriticalSection(&cs_list);
+		recycle_node(cursor);
+	}
+} 
 
 void createProcess(const char* path) {
 	
@@ -636,9 +669,9 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 		// Esvazia o vetor
 		msgVector.clear();
 
-
 		// Devolve o nó à lista de nós livres e indica espaço livre no buffer
 		recycle_node(alvo);
+		ReleaseSemaphore(sem_space, 1, NULL);
 		InterlockedIncrement(&sem_space_counter);
 
 	}
@@ -898,6 +931,8 @@ int main() {
 		printf("Thread Keybord ENCERRADA com sucesso\n");
 	}
 	CloseHandle(keyboardThread);
+
+	imprime_lista_circular(); //Imprime o conteudo que houver na lista ao encerrar o programa
 
 	CloseHandle(sem_space); 
 	CloseHandle(sem_tipo[0]); 
