@@ -43,6 +43,8 @@ HANDLE hPauseEventH; // Handle para controle de pausa/continuação
 HANDLE hPauseEventS; // Handle para controle de pausa/continuação
 HANDLE hPauseEventQ; // Handle para controle de pausa/continuação
 HANDLE hMutexFile; // Handle para exclusão mútua ao acesso do arquivo de log (txt)
+HANDLE hOpenMailslotVRQEvent;  //Handle para o evento que indica que o mailslot da tarefa Visualizacao de Rodas Quentes foi criado
+HANDLE hMailslotVRodasQ = NULL;  // Handle para o mailslot da tarefa de Visualizacao de Rodas Quentes
 
 
 // Inicialização da lista
@@ -106,13 +108,16 @@ void imprime_lista_circular() {
 		if (cursor == head) {             // Ajusta head se ela estiver sendo removida 
 			if (cursor->next == cursor) {
 				head = NULL;
-				cursor = NULL;
 			}
 			else {
 				head = prev;
+				prev->next = cursor->next;
 			}
 		}
-		prev->next = cursor->next;        // desvincula alvo
+		else {
+			prev->next = cursor->next;        // desvincula alvo
+		}
+		
 		LeaveCriticalSection(&cs_list);
 		recycle_node(cursor);
 	}
@@ -578,6 +583,8 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 	int lineCount = 0;
 	HANDLE hExecuting[2] = { hFinishAllEvent, hPauseEventD };
 	HANDLE hMultObj[2] = { hFinishAllEvent, sem_tipo[0] };
+	DWORD writtenBytesSF = 0;       // variavel para armazenar o numero de bytes escritos no mailslot
+
 	
 
 	while (TRUE) {                      
@@ -651,7 +658,19 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 		if (std::stoi(msgVector[2]) == 1) {
 
 			// Enviar mensagem para tarefa 5 por pipes/mailslots
-			printf("Mensagem de Sinalizacao enviada por pipes para visualizacao de rodas quentes: %s\n", alvo->msg.c_str());
+			BOOL retorno = WriteFile(hMailslotVRodasQ, alvo->msg.c_str(), alvo->msg.size(), &writtenBytesSF, NULL);
+			if (retorno == 0) {
+				std::cout << "Captura SF: Erro na transmissao por mailslot para o Terminal VRQ: " << GetLastError() << std::endl;
+			}
+			else if (alvo->msg.size() != writtenBytesSF) {
+				std::cout << "Captura SF: Mensagem NAO foi enviada por completo para o Terminal VRQ.\n"
+					<< "Tamanho da mensagem: " << alvo->msg.size()
+					<< "\nTemanho Enviado: " << writtenBytesSF
+					<< "\nMensagem: " << alvo->msg << std::endl;
+			}
+			else if (alvo->msg.size() == writtenBytesSF) {
+				//std::cout << "Mensagem de Sinalizacao enviada por pipes: " << alvo->msg << std::endl;
+			}
 		}
 		else {
 			//Depositar mensagem no disco
@@ -682,9 +701,17 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 /* ----------- THREAD CAPTURA DE DADOS DOS DETECTORES DE RODA QUENTE ------------------ */
 DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de rodas quentes de 34 char
 {
+	DWORD writtenBytes = 0;       // variavel para armazenar o numero de bytes escritos no mailslot
 	Node* cursor = NULL;                 // posição inicial de varredura
 	HANDLE hExecuting[2] = { hFinishAllEvent, hPauseEventH };
 	HANDLE hMultObj[2] = { hFinishAllEvent, sem_tipo[1] };
+
+	//Espera Mailslot ser criado
+	WaitForSingleObject(hOpenMailslotVRQEvent, INFINITE);
+	// Espera o handle para o mailslot do Terminal VRQ ser criado
+	while (hMailslotVRodasQ == NULL) {
+		Sleep(10);
+	}
 
 	while (TRUE) {                
 
@@ -748,11 +775,25 @@ DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de ro
 		prev->next = alvo->next;        // desvincula alvo
 		LeaveCriticalSection(&cs_list);
 
-
+		
 		// Enviar mensagem para tarefa 5 por pipes/mailslots
-		printf("Mensagem de Rodas quentes enviada por pipes: %s\n", alvo->msg.c_str());
+		BOOL retorno = WriteFile(hMailslotVRodasQ, alvo->msg.c_str(), alvo->msg.size(), &writtenBytes, NULL);
+		if (retorno == 0) {
+			std::cout << "Captura RQ: Erro na transmissao por mailslot para o Terminal VRQ: " << GetLastError() << std::endl;
+		}
+		else if (alvo->msg.size() != writtenBytes) {
+			std::cout << "Captura RQ: Mensagem NAO foi enviada por completo para o Terminal VRQ.\n"
+				<< "Tamanho da mensagem: " << alvo->msg.size()
+				<< "\nTemanho Enviado: " << writtenBytes
+				<< "\nMensagem: " << alvo->msg << std::endl;
+		}
+		else if (alvo->msg.size() == writtenBytes) {
+			//std::cout << "Mensagem de Rodas quentes enviada por pipes: " << alvo->msg << std::endl;
+		}
 
-
+		
+		
+		//printf("Mensagem de Rodas quentes enviada por pipes: %s\n", alvo->msg.c_str());
 		// Devolve o nó à lista de nós livres e indica espaço livre no buffer
 		recycle_node(alvo);
 		ReleaseSemaphore(sem_space, 1, NULL);
@@ -832,7 +873,11 @@ int main() {
 			return 1;
 	}
 	
-	
+	hOpenMailslotVRQEvent = CreateEventA(NULL, TRUE, FALSE, "OpenMailslotVRQEvent");
+	if (hFinishAllEvent == NULL) {
+		printf("Erro ao criar evento hMailslotVRQEvent: %d\n", GetLastError());
+		return 1;
+	}
 	
 
 	HANDLE keyboardThread = CreateThread(NULL, 0, keyboard_control_thread, NULL, 0, &dwThreadIdKeyboard);
@@ -845,7 +890,17 @@ int main() {
 	// Criação dos processos de exibição dos dados de sinalização ferroviária e de rodas quentes
 	createProcess("../x64/Debug/consumidor_sin_ferroviaria.exe");
 	createProcess("../x64/Debug/consumidor_rodas_quentes.exe");
+
+	//Espera Mailslot ser criado
+	WaitForSingleObject(hOpenMailslotVRQEvent, INFINITE);
+
 	
+	// Atributos: Name, DesiredAccess, ShareMode, SecurityAttributes, CreationDisposition, FlagsAndAttributes, TemplateFile
+	hMailslotVRodasQ = CreateFileA("\\\\.\\mailslot\\mail_Vrodas_quentes", GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hMailslotVRodasQ == INVALID_HANDLE_VALUE) {
+		printf("Erro ao obter handle hMailslotVRodasQ: %d\n", GetLastError());
+		//return 1;
+	}
 	HANDLE hAllThreads[5] = { keyboardThread, hotboxThread, remoteThread, sinalizacaoThread, rodasQuentesThread };
 
 	if (hotboxThread) {
@@ -939,7 +994,20 @@ int main() {
 	CloseHandle(sem_tipo[1]);
 	CloseHandle(hMutexFile);
 	CloseHandle(hRemoteEvent);
+	CloseHandle(hFinishAllEvent);
+	CloseHandle(hPauseEventC);
+	CloseHandle(hPauseEventD);
+	CloseHandle(hPauseEventH);
+	CloseHandle(hPauseEventS);
+	CloseHandle(hPauseEventQ);
+	CloseHandle(hOpenMailslotVRQEvent);
 	DeleteCriticalSection(&cs_list);
 
 	return EXIT_SUCCESS;
 }
+
+
+
+
+
+
