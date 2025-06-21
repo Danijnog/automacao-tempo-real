@@ -209,8 +209,6 @@ int main() {
 	CloseHandle(hOpenMailslotVRQEvent);
 	CloseHandle(hMailSlotRodasQ);
 
-	system("pause"); // Pausa a execução
-
 	return 0;
 }
 

@@ -72,7 +72,6 @@ std::string consume_message(std::string file_path) {
 	file.read(buffer, MSG_SIZE);
 
 	std::string message(buffer);
-	//std::cout << "Consumi: " << message << std::endl;
 
 	// Apaga a mensagem
 	file.seekp(HEADER_SIZE + head * MSG_SIZE); // Move o ponteiro de escrita do arquivo para o mesmo lugar da mensagem consumida
