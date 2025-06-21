@@ -9,6 +9,7 @@ HANDLE hPauseEvent_S; // Handle para controle de pausa/continuação
 HANDLE hFinishAll_Event; // Evento para encerrar todas as threads do programa
 HANDLE hMutexFile; // Handle para exclusão mútua ao acesso do arquivo de log (txt)
 HANDLE hRemoteEvent; // Handle para sinalizar que há mensagens no arquivo de disco para a tarefa 4
+HANDLE hFileFullEvent; // Evento para sinalizar que o arquivo está cheio e não pode ser escrito
 
 // Estado do sensor: devemos ter pelo menos 20 estados reais aleatórios possíveis
 std::vector<std::string> states = {
@@ -47,37 +48,39 @@ std::string consume_message(std::string file_path) {
 	* Consome uma mensagem do arquivo circular de mensagens.
 	*/
 	const int HEADER_SIZE = sizeof(int) * 2;
+	const int MSG_SIZE = 256;
+	const int CAP_BUFF = 200;
 
-	std::fstream file(file_path, std::ios::binary | std::ios::in | std::ios::out);
+	std::fstream file(file_path, std::ios::binary | std::ios::in | std::ios::out); // Abre o arquivo em modo binário, permitindo leitura e escrita
 	if (!file.is_open()) {
 		std::cerr << "Erro ao abrir o arquivo: " << file_path << std::endl;
-		return 0;
+		return "";
 	}
 
 	int head, tail;
-	file.read(reinterpret_cast<char*>(&head), sizeof(int));
-	file.read(reinterpret_cast<char*>(&tail), sizeof(int));
+	file.read(reinterpret_cast<char*>(&head), sizeof(int)); // Lê os primeiros 4 bytes do arquivo e armazena em head
+	file.read(reinterpret_cast<char*>(&tail), sizeof(int)); // Lê os próximos 4 bytes do arquivo e armazena em tail
 
 	if (head == tail) {
 		std::cout << "Buffer vazio!\n";
 		file.close();
-		return 0;
+		return "";
 	}
 
-	file.seekg(HEADER_SIZE + head * 40); // Permite buscar uma posição no arquivo (move o ponteiro de leitura do arquivo)
-	char buffer[41 + 1] = { 0 };
-	file.read(buffer, 41);
+	file.seekg(HEADER_SIZE + head * MSG_SIZE); // Permite buscar uma posição no arquivo (move o ponteiro de leitura do arquivo para a próxima mensagem a ser consumida)
+	char buffer[MSG_SIZE + 1] = { 0 };
+	file.read(buffer, MSG_SIZE);
 
 	std::string message(buffer);
 	//std::cout << "Consumi: " << message << std::endl;
 
 	// Apaga a mensagem
-	file.seekp(HEADER_SIZE + head * 40); // Move o ponteiro de escrita do arquivo
-	std::string empty(41, '\0');
-	file.write(empty.c_str(), 40);
+	file.seekp(HEADER_SIZE + head * MSG_SIZE); // Move o ponteiro de escrita do arquivo para o mesmo lugar da mensagem consumida
+	std::string empty(MSG_SIZE + 1, '\0');
+	file.write(empty.c_str(), MSG_SIZE); // Sobreescreve os 256 bytes da mensagem consumida com espaços vazios
 
-	int new_head = (head + 1) % 200;
-	file.seekp(0);
+	int new_head = (head + 1) % CAP_BUFF; 
+	file.seekp(0); 
 	file.write(reinterpret_cast<char*>(&new_head), sizeof(int));
 
 	file.close();
@@ -109,6 +112,12 @@ int main() {
 		return 1;
 	}
 
+	hFileFullEvent = OpenEvent(EVENT_ALL_ACCESS, FALSE, TEXT("FileFullEvent"));
+	if (hFileFullEvent == NULL) {
+		std::cerr << "Erro ao abrir o evento de sinalizacao de arquivo cheio: " << GetLastError() << std::endl;
+		return 1;
+	}
+
 	HANDLE hExecuting[2] = { hFinishAll_Event, hPauseEvent_S };
 	while (true) {
 		DWORD finish = WaitForMultipleObjects(2, hExecuting, FALSE, INFINITE);
@@ -133,6 +142,7 @@ int main() {
 				std::string consumed_msg = consume_message("sinalizacao.txt");
 				process_messages(consumed_msg);
 				ReleaseMutex(hMutexFile);
+				SetEvent(hFileFullEvent);
 			}
 		}
 	}
@@ -140,6 +150,7 @@ int main() {
 	CloseHandle(hPauseEvent_S);
 	CloseHandle(hFinishAll_Event);
 	CloseHandle(hRemoteEvent);
+	CloseHandle(hFileFullEvent);
 	CloseHandle(hMutexFile);
 	return 0;
 }

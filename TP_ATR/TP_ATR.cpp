@@ -36,6 +36,7 @@ HANDLE sem_space;          // Conta nós livres no buffer (0–200)
 
 
 HANDLE hRemoteEvent; // Handle para sinalizar que há mensagens no arquivo de disco para a tarefa 4
+HANDLE hFileFullEvent; // Evento para sinalizar que o arquivo está cheio e não pode ser escrito
 HANDLE hFinishAllEvent; // Evento para encerrar todas as threads do programa
 HANDLE hPauseEventC; // Handle para controle de pausa/continuação
 HANDLE hPauseEventD; // Handle para controle de pausa/continuação
@@ -218,10 +219,11 @@ int write_messages(std::string file_path, const std::string& msg) {
 	* Escreve no arquivo circular txt as mensagens.
 	*/
 	const int HEADER_SIZE = sizeof(int) * 2;
+	const int MSG_SIZE = 256;
 	std::fstream file(file_path, std::ios::binary | std::ios::in | std::ios::out); // Modos binários, leitura e escrita
 	int head, tail;
-	file.read(reinterpret_cast<char*>(&head), sizeof(int));
-	file.read(reinterpret_cast<char*>(&tail), sizeof(int));
+	file.read(reinterpret_cast<char*>(&head), sizeof(int)); // Lê os 4 primeiros bytes (sizeof(int)) do arquivo e armazena em head
+	file.read(reinterpret_cast<char*>(&tail), sizeof(int)); // Lê os próximos 4 bytes (sizeof(int)) do arquivo e armazena em tail
 
 	int next_tail = (tail + 1) % CAP_BUFF;
 	if (next_tail == head) {
@@ -230,10 +232,10 @@ int write_messages(std::string file_path, const std::string& msg) {
 		return 1;
 	}
 
-	file.seekp(HEADER_SIZE + tail * 40); // Seekp posiciona o ponteiro de escrita no arquivo
+	file.seekp(HEADER_SIZE + tail * MSG_SIZE); // Seekp posiciona o ponteiro de escrita no arquivo
 	std::string fixed_msg = msg;
-	fixed_msg.resize(40, '\0');
-	file.write(fixed_msg.c_str(), 40);
+	fixed_msg.resize(MSG_SIZE, '\0');
+	file.write(fixed_msg.c_str(), MSG_SIZE);
 
 	file.seekp(sizeof(int)); // Move o ponteiro de escrita do arquivo
 	file.write(reinterpret_cast<const char*>(&next_tail), sizeof(int));
@@ -680,6 +682,11 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 				if (resultado == 0) {
 					printf("Mensagem de Sinalizacao salva no disco: %s\n", alvo->msg.c_str());
 				}
+				else if (resultado == 1) {
+					std::cout << "Arquivo cheio. Bloqueando tarefa..." << std::endl;
+					WaitForSingleObject(hFileFullEvent, INFINITE);
+				}
+
 				ReleaseMutex(hMutexFile);
 				SetEvent(hRemoteEvent);
 			}
@@ -867,6 +874,12 @@ int main() {
 			return 1;
 	}
 
+	hFileFullEvent = CreateEvent(NULL, FALSE, FALSE, TEXT("FileFullEvent"));
+	if (hFileFullEvent == NULL) {
+		printf("Erro ao criar evento hFileFullEvent: %d\n", GetLastError());
+		return 1;
+	}
+
 	hFinishAllEvent = CreateEventA(NULL, TRUE, FALSE, "FinishAllEvent");
 	if (hFinishAllEvent == NULL) {
 			printf("Erro ao criar evento hFinishAllEvent: %d\n", GetLastError());
@@ -994,6 +1007,7 @@ int main() {
 	CloseHandle(sem_tipo[1]);
 	CloseHandle(hMutexFile);
 	CloseHandle(hRemoteEvent);
+	CloseHandle(hFileFullEvent);
 	CloseHandle(hFinishAllEvent);
 	CloseHandle(hPauseEventC);
 	CloseHandle(hPauseEventD);
