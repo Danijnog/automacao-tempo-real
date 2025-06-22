@@ -115,19 +115,19 @@ int main() {
 		return 1;
 	}
 
-	hMutexFile = OpenMutex(SYNCHRONIZE, FALSE, TEXT("MutexFile"));
+	hMutexFile = OpenMutex(MUTEX_ALL_ACCESS, FALSE, TEXT("MutexFile"));
 	if (hMutexFile == NULL) {
 		std::cout << "Erro ao abrir o mutex para acessar arquivo txt: " << GetLastError() << std::endl;
 		return 1;
 	}
 
-	semMsgDisco_SF = OpenSemaphoreA(SYNCHRONIZE, FALSE, "semMsgDiscoSF");
+	semMsgDisco_SF = OpenSemaphoreA(SEMAPHORE_ALL_ACCESS, FALSE, "semMsgDiscoSF");
 	if (semMsgDisco_SF == NULL) {
 		std::cout << "Erro ao abrir o semaphoro de contagem de mensagens em disco: " << GetLastError() << std::endl;
 		return 1;
 	}
 
-	semEspacoDisco_SF = OpenSemaphoreA(SYNCHRONIZE, FALSE, "semEspacoDiscoSF");
+	semEspacoDisco_SF = OpenSemaphoreA(SEMAPHORE_ALL_ACCESS, FALSE, "semEspacoDiscoSF");
 	if (semEspacoDisco_SF == NULL) {
 		std::cout << "Erro ao abrir o semaphoro de contagem de espacos no disco: " << GetLastError() << std::endl;
 		return 1;
