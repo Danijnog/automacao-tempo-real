@@ -1,3 +1,11 @@
+/*
+Esse programa é referente ao  Trabalho Prático da Disciplina de Automação em Tempo Real da UFMG
+Programadores: Beatriz Siqueira Campagnaro (2022061440) e Daniel Nogueira Junqueira (2021072244)
+Data: 06/2025
+*/
+
+
+
 #define WIN32_LEAN_AND_MEAN
 #include <iostream>
 #include <time.h>
@@ -28,24 +36,22 @@ typedef struct Node {
 CRITICAL_SECTION cs_list;  // protege lista e free_list
 
 Node  pool[CAP_BUFF];      // bloco de nós pré-alocado
-Node* free_list = NULL;    // nós livres
+Node* free_list = NULL;    // Lista de nós livres
 Node* head = NULL;         // Último elemento da lista circular (head->next é o 1.º e tb o 1° que deve ser consumido)
 
 HANDLE sem_tipo[2];        // Um semáforo por tipo de mensagem para indicar que há mensagem do respectivo tipo
 HANDLE sem_space;          // Conta nós livres no buffer (0–200)
-
-
-HANDLE hRemoteEvent; // Handle para sinalizar que há mensagens no arquivo de disco para a tarefa 4
-HANDLE hFileFullEvent; // Evento para sinalizar que o arquivo está cheio e não pode ser escrito
-HANDLE hFinishAllEvent; // Evento para encerrar todas as threads do programa
-HANDLE hPauseEventC; // Handle para controle de pausa/continuação
-HANDLE hPauseEventD; // Handle para controle de pausa/continuação
-HANDLE hPauseEventH; // Handle para controle de pausa/continuação
-HANDLE hPauseEventS; // Handle para controle de pausa/continuação
-HANDLE hPauseEventQ; // Handle para controle de pausa/continuação
-HANDLE hMutexFile; // Handle para exclusão mútua ao acesso do arquivo de log (txt)
-HANDLE hOpenMailslotVRQEvent;  //Handle para o evento que indica que o mailslot da tarefa Visualizacao de Rodas Quentes foi criado
-HANDLE hMailslotVRodasQ = NULL;  // Handle para o mailslot da tarefa de Visualizacao de Rodas Quentes
+HANDLE hRemoteEvent;       // Handle para sinalizar que há mensagens no arquivo de disco para o Terminal VSF
+HANDLE hFileFullEvent;     // Evento para sinalizar que o arquivo está cheio e não pode ser escrito
+HANDLE hFinishAllEvent;    // Evento para encerrar todas as threads do programa
+HANDLE hPauseEventC;       // Handle para controle de pausa/continuação
+HANDLE hPauseEventD;       // Handle para controle de pausa/continuação
+HANDLE hPauseEventH;       // Handle para controle de pausa/continuação
+HANDLE hPauseEventS;       // Handle para controle de pausa/continuação
+HANDLE hPauseEventQ;       // Handle para controle de pausa/continuação
+HANDLE hMutexFile;         // Handle para exclusão mútua ao acesso do arquivo de log (txt)
+HANDLE hOpenMailslotVRQEvent;     //Handle para o evento que indica que o mailslot da tarefa Visualizacao de Rodas Quentes foi criado
+HANDLE hMailslotVRodasQ = NULL;   // Handle para o mailslot da tarefa de Visualizacao de Rodas Quentes
 
 
 // Inicialização da lista
@@ -58,8 +64,8 @@ static void initialize_circular_list(void)
 	}
 }
 
-// Funções utilitarias 
 
+//Retorna um nó que esteja disponivel para inserção na lista circular, remove esse nó da free_list
 static Node* alloc_node(void)
 {
 	// Remove nó da free_list  
@@ -71,9 +77,9 @@ static Node* alloc_node(void)
 	return n;                   
 }
 
+// Devolve nó à free_list para reutilização futura 
 static void recycle_node(Node* n)
 {
-	// Devolve nó à free_list para reutilização futura 
 	EnterCriticalSection(&cs_list);
 	n->msg = "";
 	n->next = free_list;
@@ -81,7 +87,8 @@ static void recycle_node(Node* n)
 	LeaveCriticalSection(&cs_list);
 }
 
-static void msgToVector(Node* n, std::vector<std::string>& msgVector) {  // Transforma a mensagem em um vetor de strings
+// Transforma a mensagem em um vetor de strings
+static void msgToVector(Node* n, std::vector<std::string>& msgVector) {  
 	std::stringstream mensagem(n->msg);
 	std::string campo;
 	while (std::getline(mensagem, campo, ';')) {
@@ -89,12 +96,10 @@ static void msgToVector(Node* n, std::vector<std::string>& msgVector) {  // Tran
 	}
 }
 
+// Imprime todo o conteudo da lista circular no console principal e esvazia a lista
 void imprime_lista_circular() {  
-	
-	// Imprime todo o conteudo da lista circular no console principal e esvazia a lista
 
 	std::cout << "Impressao da lista:" << std::endl;
-
 	Node* cursor = NULL;
 
 	while (head != NULL) {
@@ -124,9 +129,8 @@ void imprime_lista_circular() {
 	}
 } 
 
+//Função para criar processos a partir do executável passado como parâmetro para a função.
 void createProcess(const char* path) {
-	
-	//Função para criar processos a partir do executável passado como parâmetro para a função.
 	
 	STARTUPINFOA si;
 	PROCESS_INFORMATION pi;
@@ -140,7 +144,7 @@ void createProcess(const char* path) {
 	strcpy_s(exec, path);
 
 	if (!CreateProcessA(NULL, exec, NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
-		std::cerr << "Erro ao criar processo: " << path << " Código: " << GetLastError() << std::endl;
+		std::cout << "Erro ao criar processo: " << path << " Código: " << GetLastError() << std::endl;
 		return;
 	}
 	else {
@@ -152,23 +156,25 @@ void createProcess(const char* path) {
 	CloseHandle(pi.hThread);
 }
 
+//Deposita na lista circular a mensagem recebida por parâmetro
 static void deposit_messages(std::string Mensagem, int tipo) {
 	
 	// Aloca a mensagem em um nó livre
 	Node* n = alloc_node();             // obtém slot livre
 	n->msg = Mensagem;
 
-	// Insere o nó com a mensagem no fim da lista circular                   
-	//  head aponta SEMPRE para o primeiro nó (o nó mais velho)   
+	// Insere o nó com a mensagem no fim da lista circular
+	// head corresponde ao ultimo nó adicionado na lista                  
+	// head->next aponta para o nó mais velho na lista
 	EnterCriticalSection(&cs_list);
 	if (!head) {                         // Se lista vazia   
 		head = n;
 		n->next = n;                     // Nó único aponta para si
 	}
 	else {
-		n->next = head->next;          // insere após head
+		n->next = head->next;            // Insere após head
 		head->next = n;
-		head = n;                  // n vira a nova head
+		head = n;                        // "n" vira a nova head
 	}
 	LeaveCriticalSection(&cs_list);
 
@@ -177,30 +183,26 @@ static void deposit_messages(std::string Mensagem, int tipo) {
 	
 }
 
-
+// Gera um ID aleatório no formato XXX-XXXX, onde XXX são letras maiúsculas e XXXX são dígitos
 std::string generate_random_id() {
-	/*
-	* Função para gerar um ID aleatório no formato XXX-XXXX, onde XXX são letras maiúsculas e XXXX são dígitos.
-	*/
-
-	// Gerar 3 letras maiúsculas aleatórias
+	
+	// Gera 3 letras maiúsculas aleatórias
 	std::ostringstream id;
 	for (int i = 0; i < 3; i++) {
 		id << static_cast<char>('A' + (rand() % 26));
 	}
 	id << "-";
 
-	// Gerar e adicionar 4 dígitos aleatórios
+	// Gera e adiciona 4 dígitos aleatórios
 	id << std::setw(4) << std::setfill('0') << (rand() % 10000);
 
 	return id.str();
 
 }
 
+// Inicializa o arquivo circular txt para armazenamento de mensagens
 void initialize_circular_file(std::string file_path) {
-	/*
-	* Inicializar o arquivo circular txt para armazenamento de mensagens.
-	*/
+	
 	std::ofstream file(file_path, std::ios::binary | std::ios::trunc);
 	int head = 0, tail = 0;
 
@@ -214,10 +216,8 @@ void initialize_circular_file(std::string file_path) {
 	file.close();
 }
 
+// Escreve as mensagens no arquivo circular txt
 int write_messages(std::string file_path, const std::string& msg) {
-	/*
-	* Escreve no arquivo circular txt as mensagens.
-	*/
 	const int HEADER_SIZE = sizeof(int) * 2;
 	const int MSG_SIZE = 256;
 	std::fstream file(file_path, std::ios::binary | std::ios::in | std::ios::out); // Modos binários, leitura e escrita
@@ -244,11 +244,8 @@ int write_messages(std::string file_path, const std::string& msg) {
 }
 
 
-
+// Controle do teclado para pausar e continuar a execução de cada tarefa
 DWORD WINAPI keyboard_control_thread(LPVOID) {
-	/*
-	* Controle do teclado para pausar e continuar a execução das threads.
-	*/
 	int Tecla = 0;
 	int paused = 0;
 	DWORD pausedC; 
@@ -256,7 +253,13 @@ DWORD WINAPI keyboard_control_thread(LPVOID) {
 	DWORD pausedH;
 	DWORD pausedS;
 	DWORD pausedQ;
-	printf("Pressione 'c' para pausar/continuar a simulacao ou 'ESC' para encerrar...\n\n");
+	std::cout << "Pressione: \n"
+		<< "'c' para pausar/continuar a geracao de mensagens\n"
+		<< "'d' para pausar/continuar a captura de mensagens de sinalizacao ferroviaria\n"
+		<< "'h' para pausar/continuar a captura de mensagens das hotbox\n"
+		<< "'s' para pausar/continuar o terminal de visualizacao de sinalizacao ferroviaria\n"
+		<< "'q' para pausar/continuar o terminal de visualizacao de rodas quentes\n"
+		<< "'ESC' para encerrar\n\n" << std::endl;
 
 	while(TRUE) {
 		Tecla = _getch();
@@ -312,14 +315,14 @@ DWORD WINAPI keyboard_control_thread(LPVOID) {
 				pausedS = WaitForSingleObject(hPauseEventS, 0);
 				if (pausedS == WAIT_OBJECT_0) {
 					ResetEvent(hPauseEventS);
-					std::cout << "Exibicao de dados de sinalizacao PAUSADA." << std::endl;
+					std::cout << "Terminal VSF PAUSADO." << std::endl;
 				}
 				else if (pausedS == WAIT_TIMEOUT) {
 					SetEvent(hPauseEventS);
-					std::cout << "Exibicao de dados de sinalizacao CONTINUANDO." << std::endl;
+					std::cout << "Terminal VSF CONTINUANDO." << std::endl;
 				}
 				else {
-					std::cout << "Problema ao pausar a exibicao de dados de sinalizacao: " << pausedS << std::endl;
+					std::cout << "Problema ao pausar o Terminal VSF: " << pausedS << std::endl;
 				}
 				break;
 			case 'q':
@@ -327,14 +330,14 @@ DWORD WINAPI keyboard_control_thread(LPVOID) {
 				pausedQ = WaitForSingleObject(hPauseEventQ, 0);
 				if (pausedQ == WAIT_OBJECT_0) {
 					ResetEvent(hPauseEventQ);
-					std::cout << "Exibicao de rodas quentes PAUSADA." << std::endl;
+					std::cout << "Terminal VRQ PAUSADO." << std::endl;
 				}
 				else if (pausedQ == WAIT_TIMEOUT) {
 					SetEvent(hPauseEventQ);
-					std::cout << "Exibicao de rodas quentes CONTINUANDO." << std::endl;
+					std::cout << "Terminal VRQ CONTINUANDO." << std::endl;
 				}
 				else {
-					std::cout << "Problema ao pausar a exibicao de rodas quentes: " << pausedQ << std::endl;
+					std::cout << "Problema ao pausar o Terminal VRQ: " << pausedQ << std::endl;
 				}
 				break;
 			case 27:    //ESC
@@ -353,8 +356,8 @@ DWORD WINAPI keyboard_control_thread(LPVOID) {
 	return 0;
 }
 
+// Gera mensagens provenientes dos detectores de rodas quentes (hotbox), 34 bytes
 DWORD WINAPI generate_hotbox_message(LPVOID) {
-	// Mensagens provenientes dos detectores de rodas quentes (hotbox).
 	
 	HANDLE hEvent;
 	HANDLE hExecuting[2] = { hFinishAllEvent, hPauseEventC };
@@ -370,7 +373,6 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 		// Checa se deve encerrar ou pausar
 		DWORD finish = WaitForMultipleObjects(2, hExecuting, FALSE, INFINITE);
 		if ((finish - WAIT_OBJECT_0) == 0) {
-			std::cout << "FINISH 1 HOTBOX " << std::endl;
 			break;
 		}
 		if ((finish - WAIT_OBJECT_0) != 0 && (finish - WAIT_OBJECT_0) != 1) {
@@ -400,8 +402,6 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 			SYSTEMTIME st;
 			GetLocalTime(&st); // Obtém a hora local do sistema
 
-			//printf("DEBUG: ID gerado: [%s]\n", id.c_str());
-
 			mensagem << std::setw(7) << std::setfill('0') << nseq << ";"
 				<< std::setw(2) << std::setfill('0') << msg_type << ";"
 				<< id << ";"
@@ -424,11 +424,10 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 			
 			DWORD dwWaitResult2 = WaitForMultipleObjects(2, hMultObj, FALSE, INFINITE); //Espera comando para finalizar ou espaco no buffer
 			if ((dwWaitResult2 - WAIT_OBJECT_0) == 0) {
-				std::cout << "FINISH 2 HOTBOX " << std::endl;
 				break;
 			}
 			if ((dwWaitResult2 - WAIT_OBJECT_0) != 0 && (dwWaitResult2 - WAIT_OBJECT_0) != 1) {
-				printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+				printf("Geracao Hotbox: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
 				return 1;
 			}
 			InterlockedDecrement(&sem_space_counter);
@@ -440,17 +439,6 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 
 			
 			deposit_messages(msg, 1); // Deposita a mensagem na lista circular
-
-			/*
-			 //Imprime uma mensagem salva na lista a cada 50 mensagens salvas
-			if (counter % 50 == 1) {
-				printf("Hotbox message: %s\n", msg.c_str());
-				counter = 0;
-			}
-			else {
-				counter += 1;
-			}
-			*/
 		}
 
 	}
@@ -458,10 +446,8 @@ DWORD WINAPI generate_hotbox_message(LPVOID) {
 	return 0;
 }
 
+// Gera as mensagens de sinalização ferroviária, 40 bytes
 DWORD WINAPI generate_remote_message(LPVOID) {
-	/*
-	* Mensagens de sinalização provenientes das remotas de E/S.
-	*/
 	HANDLE hEvent;
 	HANDLE hExecuting[2] = {hFinishAllEvent, hPauseEventC};
 	HANDLE hMultObj[2] = { hFinishAllEvent, sem_space };
@@ -470,14 +456,12 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 	std::string msg;
 	std::ostringstream mensagem;
 	int threadBloqueada = -1;
-	//int counter = 0;  //usado para imprimir mensagens periodicamente
 
 	while (true) {
 
 		// Checa se deve encerrar ou pausar
 		DWORD finish = WaitForMultipleObjects(2, hExecuting, FALSE, INFINITE);
 		if ((finish - WAIT_OBJECT_0) ==  0) {
-			std::cout << "FINISH 1 REMOTE " << std::endl;
 			break;
 		}
 		if ((finish - WAIT_OBJECT_0) != 0 && (finish - WAIT_OBJECT_0) != 1) {
@@ -491,7 +475,7 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 
 		if (status == WAIT_TIMEOUT) {
 			// NSEQ
-			long nseq = InterlockedIncrement(&nseq_counter_remote); // Long indica que o tipo de dados deve ter pelo menos 32 bits. Incrementa atomicamente a variável.
+			long nseq = InterlockedIncrement(&nseq_counter_remote); 
 
 			// Tipo
 			int msg_type = 00;
@@ -541,11 +525,10 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 			}
 			DWORD dwWaitResult2 = WaitForMultipleObjects(2, hMultObj, FALSE, INFINITE); //Espera comando para finalizar ou espaco no buffer
 			if (dwWaitResult2 - WAIT_OBJECT_0 == 0) {
-				std::cout << "FINISH 2 REMOTE " << std::endl;
 				break;
 			}
 			if (dwWaitResult2 - WAIT_OBJECT_0 != 0 && dwWaitResult2 - WAIT_OBJECT_0 != 1) {
-				printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+				printf("Geracao Remotas: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
 				
 			}
 			InterlockedDecrement(&sem_space_counter);
@@ -558,17 +541,6 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 
 			;
 			deposit_messages(msg, 0); // Deposita a mensagem na lista circular
-			
-			/*
-			//Imprime uma mensagem a cada 50 
-			if (counter % 50 == 1) {
-				printf("Remote message: %s\n", msg.c_str());
-				counter = 0;
-			}
-			else {
-				counter += 1;
-			}
-			*/
 		}
 	}
 	CloseHandle(hEvent);
@@ -578,14 +550,14 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 
 
 /* ----------- THREAD CAPTURA DE DADOS DE SINALIZAÇÃO FERROVIÁRIA ------------------ */
-DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferroviaria de 40 char
-{
-	Node* cursor = NULL;                 // posição atual de varredura
+// Lê mensagens de sinalização ferroviaria de 40 char
+DWORD WINAPI captura_sinalizacao(LPVOID) {
+	Node* cursor = NULL;                  // Cursor para percorrer a lista ao remover mensgens
 	std::vector<std::string> msgVector;   // Vetor para armazenar a mensagem
 	int lineCount = 0;
 	HANDLE hExecuting[2] = { hFinishAllEvent, hPauseEventD };
 	HANDLE hMultObj[2] = { hFinishAllEvent, sem_tipo[0] };
-	DWORD writtenBytesSF = 0;       // variavel para armazenar o numero de bytes escritos no mailslot
+	DWORD writtenBytesSF = 0;             // variavel para armazenar o numero de bytes escritos no mailslot
 
 	
 
@@ -594,29 +566,27 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 		// Checa se deve encerrar ou pausar
 		DWORD finish = WaitForMultipleObjects(2, hExecuting, FALSE, INFINITE);
 		if ((finish - WAIT_OBJECT_0) == 0) {
-			std::cout << "FINISH 1 SINALIZACAO " << std::endl;
 			break;
 		}
 		if ((finish - WAIT_OBJECT_0) != 0 && (finish - WAIT_OBJECT_0) != 1) {
-			printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+			printf("Captura SF: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
 			
 		}
 		
 		// Aguarda comando de finalizar ou existir mensagem do meu tipo 
 		DWORD dwWaitResult2 = WaitForMultipleObjects(2, hMultObj, FALSE, INFINITE);
 		if ((dwWaitResult2 - WAIT_OBJECT_0) == 0) {
-			std::cout << "FINISH 2 SINALIZACAO " << std::endl;
 			break;
 		}
 		if ((dwWaitResult2 - WAIT_OBJECT_0) != 0 && (dwWaitResult2 - WAIT_OBJECT_0) != 1) {
-			printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+			printf("Captura SF: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
 			
 		}
 
 		// Espera permissão para acessar a lista circular
 		EnterCriticalSection(&cs_list);
 
-		if (!cursor) {                     // Primeira vez: começa no início
+		if (!cursor) {                     // Cursor começa no início da lista
 			if (head) {					   // Como ponteiro, head retorna falso apenas se for igual a NULL
 				cursor = head->next;
 			}
@@ -658,8 +628,7 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 
 		// Verifica o valor de DIAG e dá destino à mensagem
 		if (std::stoi(msgVector[2]) == 1) {
-
-			// Enviar mensagem para tarefa 5 por pipes/mailslots
+			// Envia mensagem para tarefa 5 por pipes/mailslots
 			BOOL retorno = WriteFile(hMailslotVRodasQ, alvo->msg.c_str(), alvo->msg.size(), &writtenBytesSF, NULL);
 			if (retorno == 0) {
 				std::cout << "Captura SF: Erro na transmissao por mailslot para o Terminal VRQ: " << GetLastError() << std::endl;
@@ -670,19 +639,13 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 					<< "\nTemanho Enviado: " << writtenBytesSF
 					<< "\nMensagem: " << alvo->msg << std::endl;
 			}
-			else if (alvo->msg.size() == writtenBytesSF) {
-				//std::cout << "Mensagem de Sinalizacao enviada por pipes: " << alvo->msg << std::endl;
-			}
 		}
 		else {
-			//Depositar mensagem no disco
+			// Deposita mensagem no disco
 			DWORD dwWaitResultMutex = WaitForSingleObject(hMutexFile, INFINITE);
 			if (dwWaitResultMutex == WAIT_OBJECT_0) {
 				int resultado = write_messages("sinalizacao.txt", alvo->msg);
-				if (resultado == 0) {
-					printf("Mensagem de Sinalizacao salva no disco: %s\n", alvo->msg.c_str());
-				}
-				else if (resultado == 1) {
+				if (resultado == 1) {
 					std::cout << "Arquivo cheio. Bloqueando tarefa..." << std::endl;
 					WaitForSingleObject(hFileFullEvent, INFINITE);
 				}
@@ -706,10 +669,11 @@ DWORD WINAPI captura_sinalizacao(LPVOID)  // Lê mensagens de sinalização ferrovi
 }
 
 /* ----------- THREAD CAPTURA DE DADOS DOS DETECTORES DE RODA QUENTE ------------------ */
-DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de rodas quentes de 34 char
+// Lê mensagens dos detectores de rodas quentes de 34 char
+DWORD WINAPI captura_rodas_quentes(LPVOID)  
 {
-	DWORD writtenBytes = 0;       // variavel para armazenar o numero de bytes escritos no mailslot
-	Node* cursor = NULL;                 // posição inicial de varredura
+	DWORD writtenBytes = 0;				// variavel para armazenar o numero de bytes escritos no mailslot
+	Node* cursor = NULL;                // posição inicial de varredura
 	HANDLE hExecuting[2] = { hFinishAllEvent, hPauseEventH };
 	HANDLE hMultObj[2] = { hFinishAllEvent, sem_tipo[1] };
 
@@ -725,30 +689,28 @@ DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de ro
 		// Checa se deve encerrar ou pausar
 		DWORD finish = WaitForMultipleObjects(2, hExecuting, FALSE, INFINITE);
 		if ((finish - WAIT_OBJECT_0) == 0) {
-			std::cout << "FINISH 1 RODAS " << std::endl;
 			break;
 		}
 		if ((finish - WAIT_OBJECT_0) != 0 && (finish - WAIT_OBJECT_0) != 1) {
-			printf("Rodas Quentes: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+			printf("Captura RQ: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
 			return 1;
 		}
 
 		// Aguarda comando de finalizar ou existir mensagem do meu tipo 
 		DWORD dwWaitResult2 = WaitForMultipleObjects(2, hMultObj, FALSE, INFINITE); 
 		if ((dwWaitResult2 - WAIT_OBJECT_0) == 0) {
-			std::cout << "FINISH 2 RODAS " << std::endl;
 			break;
 		}
 		if ((dwWaitResult2 - WAIT_OBJECT_0) != 0 && (dwWaitResult2 - WAIT_OBJECT_0) != 1) {
-			printf("Sinalizacao: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+			printf("Captura RQ: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
 			return 1;
 		}
 
 		// Busca próximo nó do meu tipo na lista circular
 		EnterCriticalSection(&cs_list);
 
-		if (!cursor) {                     // Primeira vez: começa no início
-			if (head) {          // Como ponteiro, head retorna falso apenas se for igual a NULL
+		if (!cursor) {                  // Primeira vez: começa no início
+			if (head) {					// Como ponteiro, head retorna falso apenas se for igual a NULL
 				cursor = head->next;
 			}
 			else { 
@@ -758,12 +720,13 @@ DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de ro
 			}  
 		}
 
-		while (cursor && cursor->msg.length() != 34)  // Percorre a lista até encontrar uma mensagem de 34 char
+		// Percorre a lista até encontrar uma mensagem de 34 char
+		while (cursor && cursor->msg.length() != 34)  
 			cursor = cursor->next;
 
 
 		Node* alvo = cursor;             // Nó correspondente à mensagem a ser processada
-		cursor = NULL;           // Avança para ser usado na próxima busca
+		cursor = NULL;					 // Reseta para ser usado na próxima busca
 
 
 		// Remoção do nó da lista circular 
@@ -779,11 +742,11 @@ DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de ro
 				head = prev;
 			}
 		}
-		prev->next = alvo->next;        // desvincula alvo
+		prev->next = alvo->next;        // Desvincula alvo
 		LeaveCriticalSection(&cs_list);
 
 		
-		// Enviar mensagem para tarefa 5 por pipes/mailslots
+		// Envia mensagem para tarefa 5 por pipes/mailslots
 		BOOL retorno = WriteFile(hMailslotVRodasQ, alvo->msg.c_str(), alvo->msg.size(), &writtenBytes, NULL);
 		if (retorno == 0) {
 			std::cout << "Captura RQ: Erro na transmissao por mailslot para o Terminal VRQ: " << GetLastError() << std::endl;
@@ -794,13 +757,7 @@ DWORD WINAPI captura_rodas_quentes(LPVOID)  // Lê mensagens dos detectores de ro
 				<< "\nTemanho Enviado: " << writtenBytes
 				<< "\nMensagem: " << alvo->msg << std::endl;
 		}
-		else if (alvo->msg.size() == writtenBytes) {
-			//std::cout << "Mensagem de Rodas quentes enviada por pipes: " << alvo->msg << std::endl;
-		}
 
-		
-		
-		//printf("Mensagem de Rodas quentes enviada por pipes: %s\n", alvo->msg.c_str());
 		// Devolve o nó à lista de nós livres e indica espaço livre no buffer
 		recycle_node(alvo);
 		ReleaseSemaphore(sem_space, 1, NULL);
@@ -835,7 +792,7 @@ int main() {
 
 	hPauseEventC = CreateEvent(
 		NULL,   // Atributos de segurança padrão
-		TRUE,   // Manual-reset (nós controlamos o reset)
+		TRUE,   // Manual-reset 
 		TRUE,   // Estado inicial (sinalizado = executando)
 		NULL    // Sem nome
 	);
@@ -870,8 +827,8 @@ int main() {
 
 	hRemoteEvent = CreateEvent(NULL, FALSE, FALSE, TEXT("RemoteEvent"));
 	if (hRemoteEvent == NULL) {
-			printf("Erro ao criar evento hRemoteEvent: %d\n", GetLastError());
-			return 1;
+		printf("Erro ao criar evento hRemoteEvent: %d\n", GetLastError());
+		return 1;
 	}
 
 	hFileFullEvent = CreateEvent(NULL, FALSE, FALSE, TEXT("FileFullEvent"));
@@ -882,8 +839,8 @@ int main() {
 
 	hFinishAllEvent = CreateEventA(NULL, TRUE, FALSE, "FinishAllEvent");
 	if (hFinishAllEvent == NULL) {
-			printf("Erro ao criar evento hFinishAllEvent: %d\n", GetLastError());
-			return 1;
+		printf("Erro ao criar evento hFinishAllEvent: %d\n", GetLastError());
+		return 1;
 	}
 	
 	hOpenMailslotVRQEvent = CreateEventA(NULL, TRUE, FALSE, "OpenMailslotVRQEvent");

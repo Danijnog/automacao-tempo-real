@@ -8,7 +8,7 @@
 HANDLE hPauseEvent_S; // Handle para controle de pausa/continuação
 HANDLE hFinishAll_Event; // Evento para encerrar todas as threads do programa
 HANDLE hMutexFile; // Handle para exclusão mútua ao acesso do arquivo de log (txt)
-HANDLE hRemoteEvent; // Handle para sinalizar que há mensagens no arquivo de disco para a tarefa 4
+HANDLE hRemoteEvent; // Handle para sinalizar que há mensagens no arquivo de disco para o Terminal VSF
 HANDLE hFileFullEvent; // Evento para sinalizar que o arquivo está cheio e não pode ser escrito
 
 // Estado do sensor: devemos ter pelo menos 20 estados reais aleatórios possíveis
@@ -19,10 +19,8 @@ std::vector<std::string> states = {
 	"Termino de Precaucao", "Reassuma Velocidade", "Manutencao Mecanica", "Limite de Manobra", "Inicio de CTC"
 };
 
+// Formata e imprime a mensagem recebida por parametro
 void process_messages(const std::string& line) {
-	/*
-	* Formata as mensagens de uma linha do arquivo de forma requisitada no trabalho.
-	*/
 	std::istringstream ss(line);
 	std::string nseq, tipo, diag, id_remota, id_sensor, estado, hora;
 
@@ -43,10 +41,8 @@ void process_messages(const std::string& line) {
 		<< " SENSOR: " << id_sensor << " ESTADO: " << states[random_index] << std::endl;
 }
 
+// Consome uma mensagem do arquivo circular de mensagens
 std::string consume_message(std::string file_path) {
-	/*
-	* Consome uma mensagem do arquivo circular de mensagens.
-	*/
 	const int HEADER_SIZE = sizeof(int) * 2;
 	const int MSG_SIZE = 256;
 	const int CAP_BUFF = 200;
@@ -107,35 +103,37 @@ int main() {
 
 	hRemoteEvent = OpenEvent(EVENT_ALL_ACCESS, FALSE, TEXT("RemoteEvent"));
 	if (hRemoteEvent == NULL) {
-		std::cerr << "Erro ao abrir o evento remoto de sinalizacacao de escrita no arquivo txt: " << GetLastError() << std::endl;
+		std::cout << "Erro ao abrir o evento remoto de sinalizacacao de escrita no arquivo txt: " << GetLastError() << std::endl;
 		return 1;
 	}
 
 	hFileFullEvent = OpenEvent(EVENT_ALL_ACCESS, FALSE, TEXT("FileFullEvent"));
 	if (hFileFullEvent == NULL) {
-		std::cerr << "Erro ao abrir o evento de sinalizacao de arquivo cheio: " << GetLastError() << std::endl;
+		std::cout << "Erro ao abrir o evento de sinalizacao de arquivo cheio: " << GetLastError() << std::endl;
+		return 1;
+	}
+
+	hMutexFile = OpenMutex(SYNCHRONIZE, FALSE, TEXT("MutexFile"));
+	if (hMutexFile == NULL) {
+		std::cout << "Erro ao abrir o mutex para acessar arquivo txt: " << GetLastError() << std::endl;
 		return 1;
 	}
 
 	HANDLE hExecuting[2] = { hFinishAll_Event, hPauseEvent_S };
 	while (true) {
+		// Checa se deve encerrar ou pausar
 		DWORD finish = WaitForMultipleObjects(2, hExecuting, FALSE, INFINITE);
 		DWORD result = finish - WAIT_OBJECT_0;
 
 		// Evento ESC foi capturado
 		if (result == 0) {
-			std::cout << "FINISH 1 SINALIZACAO " << std::endl;
 			break;
 		}
 
+		DWORD dwWaitResult = WaitForSingleObject(hRemoteEvent, 0);
 		// Evento de que há mensagens no arquivo foi sinalizado
-		if (WaitForSingleObject(hRemoteEvent, 0) == WAIT_OBJECT_0) {
-			hMutexFile = OpenMutex(SYNCHRONIZE, FALSE, TEXT("MutexFile"));
-			if (hMutexFile == NULL) {
-				std::cerr << "Erro ao abrir o mutex para acessar arquivo txt: " << GetLastError() << std::endl;
-				return 1;
-			}
-
+		if (dwWaitResult == WAIT_OBJECT_0) {
+			// Conquista mutex para acesso ao arquivo
 			DWORD dwWaitResultMutex = WaitForSingleObject(hMutexFile, INFINITE);
 			if (dwWaitResultMutex == WAIT_OBJECT_0) { // Conquistou o mutex e o evento está sinalizado
 				std::string consumed_msg = consume_message("sinalizacao.txt");
