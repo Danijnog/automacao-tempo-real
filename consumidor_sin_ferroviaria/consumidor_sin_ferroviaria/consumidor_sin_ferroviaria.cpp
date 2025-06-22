@@ -10,6 +10,8 @@ HANDLE hFinishAll_Event; // Evento para encerrar todas as threads do programa
 HANDLE hMutexFile; // Handle para exclusão mútua ao acesso do arquivo de log (txt)
 HANDLE hRemoteEvent; // Handle para sinalizar que há mensagens no arquivo de disco para o Terminal VSF
 HANDLE hFileFullEvent; // Evento para sinalizar que o arquivo está cheio e não pode ser escrito
+HANDLE semMsgDisco_SF;          // Semaforo para contagem de mensagens disponiveis no arquivo em disco
+HANDLE semEspacoDisco_SF;          // Semaforo para contagem de espacos disponiveis no arquivo em disco
 
 // Estado do sensor: devemos ter pelo menos 20 estados reais aleatórios possíveis
 std::vector<std::string> states = {
@@ -119,10 +121,29 @@ int main() {
 		return 1;
 	}
 
+	semMsgDisco_SF = OpenSemaphoreA(SYNCHRONIZE, FALSE, "semMsgDiscoSF");
+	if (semMsgDisco_SF == NULL) {
+		std::cout << "Erro ao abrir o semaphoro de contagem de mensagens em disco: " << GetLastError() << std::endl;
+		return 1;
+	}
+
+	semEspacoDisco_SF = OpenSemaphoreA(SYNCHRONIZE, FALSE, "semEspacoDiscoSF");
+	if (semEspacoDisco_SF == NULL) {
+		std::cout << "Erro ao abrir o semaphoro de contagem de espacos no disco: " << GetLastError() << std::endl;
+		return 1;
+	}
+
 	HANDLE hExecuting[2] = { hFinishAll_Event, hPauseEvent_S };
+	HANDLE hMultObj[2] = { hFinishAll_Event, semMsgDisco_SF };
+	LONG semEspDiscoPrevCount = 0; 
+
 	while (true) {
 		// Checa se deve encerrar ou pausar
-		DWORD finish = WaitForMultipleObjects(2, hExecuting, FALSE, INFINITE);
+		DWORD finish = WaitForMultipleObjects(2, hExecuting, FALSE, 1);
+		if (finish == WAIT_TIMEOUT) {
+			finish = WaitForMultipleObjects(2, hExecuting, FALSE, INFINITE);
+		}
+
 		DWORD result = finish - WAIT_OBJECT_0;
 
 		// Evento ESC foi capturado
@@ -130,17 +151,25 @@ int main() {
 			break;
 		}
 
-		DWORD dwWaitResult = WaitForSingleObject(hRemoteEvent, 0);
+		// Aguarda comando de finalizar ou haver mensagem no arquivo
+		DWORD dwWaitResult2 = WaitForMultipleObjects(2, hMultObj, FALSE, INFINITE);
+		if ((dwWaitResult2 - WAIT_OBJECT_0) == 0) {
+			break;
+		}
 		// Evento de que há mensagens no arquivo foi sinalizado
-		if (dwWaitResult == WAIT_OBJECT_0) {
+		if ((dwWaitResult2 - WAIT_OBJECT_0) == 1) {
 			// Conquista mutex para acesso ao arquivo
 			DWORD dwWaitResultMutex = WaitForSingleObject(hMutexFile, INFINITE);
-			if (dwWaitResultMutex == WAIT_OBJECT_0) { // Conquistou o mutex e o evento está sinalizado
+			if (dwWaitResultMutex == WAIT_OBJECT_0) { // Conquistou o mutex 
 				std::string consumed_msg = consume_message("sinalizacao.txt");
 				process_messages(consumed_msg);
 				ReleaseMutex(hMutexFile);
-				SetEvent(hFileFullEvent);
+				ReleaseSemaphore(semEspacoDisco_SF, 1, &semEspDiscoPrevCount);
 			}
+		}
+		if ((dwWaitResult2 - WAIT_OBJECT_0) != 0 && (dwWaitResult2 - WAIT_OBJECT_0) != 1) {
+			printf("Captura SF: Erro nos objetos sincronizacao de execucao: %d\n", GetLastError());
+
 		}
 	}
 
@@ -149,5 +178,7 @@ int main() {
 	CloseHandle(hRemoteEvent);
 	CloseHandle(hFileFullEvent);
 	CloseHandle(hMutexFile);
+	CloseHandle(semMsgDisco_SF);
+	CloseHandle(semEspacoDisco_SF);
 	return 0;
 }

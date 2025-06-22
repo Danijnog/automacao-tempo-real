@@ -11,6 +11,7 @@ HANDLE hFinish_All_Event;      // Evento para encerrar todas as threads do progr
 HANDLE hMailSlotRodasQ;        //Handle para o mailslot da tarefa de visualizaçao de rodas quentes
 HANDLE hOpenMailslotVRQEvent;  //Handle para o evento que indica que o mailslot da tarefa Visualizacao de Rodas Quentes foi criado
 
+
  // Transforma a mensagem em um vetor de strings
 static void msgToVector(const char* mensagem, std::vector<std::string>& msgVector) { 
 	
@@ -127,6 +128,7 @@ int main() {
 	if (hOpenMailslotVRQEvent == NULL) {
 		printf("Erro ao criar evento hMailslotVRQEvent: %d\n", GetLastError());
 	}
+
 
 	SECURITY_ATTRIBUTES secAttribMailslot;
 	secAttribMailslot.nLength = sizeof(SECURITY_ATTRIBUTES);

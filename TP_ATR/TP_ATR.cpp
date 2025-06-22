@@ -41,6 +41,8 @@ Node* head = NULL;         // Último elemento da lista circular (head->next é o 
 
 HANDLE sem_tipo[2];        // Um semáforo por tipo de mensagem para indicar que há mensagem do respectivo tipo
 HANDLE sem_space;          // Conta nós livres no buffer (0–200)
+HANDLE semMsgDiscoSF;      // Conta mensagens disponiveis no arquivo em disco
+HANDLE semEspacoDiscoSF;   // Conta espacos disponiveis no arquivo em disco
 HANDLE hRemoteEvent;       // Handle para sinalizar que há mensagens no arquivo de disco para o Terminal VSF
 HANDLE hFileFullEvent;     // Evento para sinalizar que o arquivo está cheio e não pode ser escrito
 HANDLE hFinishAllEvent;    // Evento para encerrar todas as threads do programa
@@ -470,8 +472,9 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 		}
 
 		int time_ms = (rand() % 1901) + 100; // Gera um número aleatório entre 100 e 2000
-		status = WaitForSingleObject(hEvent, time_ms); // Aguarda o timeout para gerar a próxima mensagem (entre 100 e 2000 ms)
-		
+		//status = WaitForSingleObject(hEvent, time_ms); // Aguarda o timeout para gerar a próxima mensagem (entre 100 e 2000 ms)
+		status = WaitForSingleObject(hEvent, 100); // Aguarda o timeout para gerar a próxima mensagem (entre 100 e 2000 ms)
+
 
 		if (status == WAIT_TIMEOUT) {
 			// NSEQ
@@ -557,8 +560,9 @@ DWORD WINAPI captura_sinalizacao(LPVOID) {
 	int lineCount = 0;
 	HANDLE hExecuting[2] = { hFinishAllEvent, hPauseEventD };
 	HANDLE hMultObj[2] = { hFinishAllEvent, sem_tipo[0] };
+	HANDLE hMultObjDisco[2] = { hFinishAllEvent, semEspacoDiscoSF };
 	DWORD writtenBytesSF = 0;             // variavel para armazenar o numero de bytes escritos no mailslot
-
+	LONG semMsgDiscoPrevCount = 0;       //Ponteiro para variavel onde armazenar o valor de contagem anterior do semaforo semMsgDiscoSF
 	
 
 	while (TRUE) {                      
@@ -642,16 +646,26 @@ DWORD WINAPI captura_sinalizacao(LPVOID) {
 		}
 		else {
 			// Deposita mensagem no disco
-			DWORD dwWaitResultMutex = WaitForSingleObject(hMutexFile, INFINITE);
-			if (dwWaitResultMutex == WAIT_OBJECT_0) {
-				int resultado = write_messages("sinalizacao.txt", alvo->msg);
-				if (resultado == 1) {
-					std::cout << "Arquivo cheio. Bloqueando tarefa..." << std::endl;
-					WaitForSingleObject(hFileFullEvent, INFINITE);
+			// Aguarda comando de finalizar ou haver espaco no arquivo em disco
+			DWORD dwWaitResult3 = WaitForMultipleObjects(2, hMultObjDisco, FALSE, 0);
+			if (dwWaitResult3 == WAIT_TIMEOUT) {
+				std::cout << "Arquivo cheio. Tarefa Captura SF BLOQUEADA" << std::endl;
+				dwWaitResult3 = WaitForMultipleObjects(2, hMultObjDisco, FALSE, INFINITE);
+				if ((dwWaitResult3 - WAIT_OBJECT_0) == 1) {
+					std::cout << "Espaco liberado no arquivo. Tarefa Captura SF DESBLOQUEADA" << std::endl;
 				}
-
-				ReleaseMutex(hMutexFile);
-				SetEvent(hRemoteEvent);
+			}
+			if ((dwWaitResult3 - WAIT_OBJECT_0) == 0) {
+				break;
+			}
+			// Evento de que há mensagens no arquivo foi sinalizado
+			if ((dwWaitResult3 - WAIT_OBJECT_0) == 1) {
+				DWORD dwWaitResultMutex = WaitForSingleObject(hMutexFile, INFINITE);
+				if (dwWaitResultMutex == WAIT_OBJECT_0) {
+					int resultado = write_messages("sinalizacao.txt", alvo->msg);
+					ReleaseMutex(hMutexFile);
+					ReleaseSemaphore(semMsgDiscoSF, 1, &semMsgDiscoPrevCount);
+				}
 			}
 		}
 
@@ -788,7 +802,8 @@ int main() {
 	sem_space = CreateSemaphore(NULL, CAP_BUFF, CAP_BUFF, NULL);
 	sem_tipo[0] = CreateSemaphore(NULL, 0, CAP_BUFF, NULL);
 	sem_tipo[1] = CreateSemaphore(NULL, 0, CAP_BUFF, NULL);
-
+	semMsgDiscoSF = CreateSemaphoreA(NULL, 0, 200, "semMsgDiscoSF");
+	semEspacoDiscoSF = CreateSemaphoreA(NULL, 200, 200, "semEspacoDiscoSF");
 
 	hPauseEventC = CreateEvent(
 		NULL,   // Atributos de segurança padrão
@@ -972,6 +987,8 @@ int main() {
 	CloseHandle(hPauseEventS);
 	CloseHandle(hPauseEventQ);
 	CloseHandle(hOpenMailslotVRQEvent);
+	CloseHandle(semMsgDiscoSF);
+	CloseHandle(semEspacoDiscoSF);
 	DeleteCriticalSection(&cs_list);
 
 	return EXIT_SUCCESS;
