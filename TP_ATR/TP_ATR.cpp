@@ -132,10 +132,9 @@ void imprime_lista_circular() {
 } 
 
 //Função para criar processos a partir do executável passado como parâmetro para a função.
-void createProcess(const char* path) {
+void createProcess(PROCESS_INFORMATION& pi, const char* path) {
 	
 	STARTUPINFOA si;
-	PROCESS_INFORMATION pi;
 
 	ZeroMemory(&si, sizeof(si)); // Zera a estrutura
 	si.cb = sizeof(si);
@@ -153,9 +152,6 @@ void createProcess(const char* path) {
 		
 		std::cout << "Processo criado com PID: " << pi.dwProcessId << " a partir do executavel: " << exec << std::endl;
 	}
-
-	CloseHandle(pi.hProcess);
-	CloseHandle(pi.hThread);
 }
 
 //Deposita na lista circular a mensagem recebida por parâmetro
@@ -228,8 +224,8 @@ int write_messages(std::string file_path, const std::string& msg) {
 	file.read(reinterpret_cast<char*>(&tail), sizeof(int)); // Lê os próximos 4 bytes (sizeof(int)) do arquivo e armazena em tail
 
 	int next_tail = (tail + 1) % CAP_BUFF;
+	// Confere se há espaço no arquivo
 	if (next_tail == head) {
-		std::cout << "Buffer cheio, não é possível escrever a mensagem." << std::endl;
 		file.close();
 		return 1;
 	}
@@ -564,6 +560,12 @@ DWORD WINAPI captura_sinalizacao(LPVOID) {
 	DWORD writtenBytesSF = 0;             // variavel para armazenar o numero de bytes escritos no mailslot
 	LONG semMsgDiscoPrevCount = 0;       //Ponteiro para variavel onde armazenar o valor de contagem anterior do semaforo semMsgDiscoSF
 	
+	//Espera Mailslot ser criado
+	WaitForSingleObject(hOpenMailslotVRQEvent, INFINITE);
+	// Espera o handle para o mailslot do Terminal VRQ ser criado
+	while (hMailslotVRodasQ == NULL) {
+		Sleep(10);
+	}
 
 	while (TRUE) {                      
 		
@@ -873,8 +875,8 @@ int main() {
 	PROCESS_INFORMATION piFerroviaria;
 	PROCESS_INFORMATION piRodas;
 	// Criação dos processos de exibição dos dados de sinalização ferroviária e de rodas quentes
-	createProcess("../x64/Debug/consumidor_sin_ferroviaria.exe");
-	createProcess("../x64/Debug/consumidor_rodas_quentes.exe");
+	createProcess(piFerroviaria, "../x64/Debug/consumidor_sin_ferroviaria.exe");
+	createProcess(piRodas, "../x64/Debug/consumidor_rodas_quentes.exe");
 
 	//Espera Mailslot ser criado
 	WaitForSingleObject(hOpenMailslotVRQEvent, INFINITE);
@@ -971,6 +973,26 @@ int main() {
 		printf("Thread Keybord ENCERRADA com sucesso\n");
 	}
 	CloseHandle(keyboardThread);
+
+	BOOL exitCodeVSF = GetExitCodeProcess(piFerroviaria.hProcess, &dwExitCode);
+	if (exitCodeVSF == 0) {
+		printf("Falha ao encerrar Processo Terminal VSF: %d\n", GetLastError());
+	}
+	else {
+		printf("Processo Terminal VSF ENCERRADO com sucesso\n");
+	}
+	CloseHandle(piFerroviaria.hProcess);
+	CloseHandle(piFerroviaria.hThread);
+
+	BOOL exitCodeVRQ = GetExitCodeProcess(piRodas.hProcess, &dwExitCode);
+	if (exitCodeVRQ == 0) {
+		printf("Falha ao encerrar Processo Terminal VRQ: %d\n", GetLastError());
+	}
+	else {
+		printf("Processo Terminal VRQ ENCERRADO com sucesso\n");
+	}
+	CloseHandle(piRodas.hProcess);
+	CloseHandle(piRodas.hThread);
 
 	imprime_lista_circular(); //Imprime o conteudo que houver na lista ao encerrar o programa
 

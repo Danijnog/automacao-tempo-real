@@ -59,8 +59,8 @@ std::string consume_message(std::string file_path) {
 	file.read(reinterpret_cast<char*>(&head), sizeof(int)); // Lê os primeiros 4 bytes do arquivo e armazena em head
 	file.read(reinterpret_cast<char*>(&tail), sizeof(int)); // Lê os próximos 4 bytes do arquivo e armazena em tail
 
+	// Confere se o arquivo não está vazio
 	if (head == tail) {
-		std::cout << "Buffer vazio!\n";
 		file.close();
 		return "";
 	}
@@ -141,11 +141,11 @@ int main() {
 		// Checa se deve encerrar ou pausar
 		DWORD finish = WaitForMultipleObjects(2, hExecuting, FALSE, 1);
 		if (finish == WAIT_TIMEOUT) {
+			std::cout << "Terminal de Visualizacao de Sinalizacao Ferroviaria (VSF) BLOQUEADO" << std::endl;
 			finish = WaitForMultipleObjects(2, hExecuting, FALSE, INFINITE);
+			std::cout << "Terminal VSF DESBLOQUEADO" << std::endl;
 		}
-
 		DWORD result = finish - WAIT_OBJECT_0;
-
 		// Evento ESC foi capturado
 		if (result == 0) {
 			break;

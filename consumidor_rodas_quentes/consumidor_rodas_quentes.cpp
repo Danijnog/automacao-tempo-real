@@ -146,7 +146,12 @@ int main() {
 
 	while (TRUE) {
 		// Checa se deve encerrar ou pausar
-		DWORD finish = WaitForMultipleObjects(2, h_Executing, FALSE, INFINITE);
+		DWORD finish = WaitForMultipleObjects(2, h_Executing, FALSE, 1);
+		if (finish == WAIT_TIMEOUT) {
+			std::cout << "Terminal de Visualizacao de Rodas Quentes (VRQ) BLOQUEADO" << std::endl;
+			finish = WaitForMultipleObjects(2, h_Executing, FALSE, INFINITE);
+			std::cout << "Terminal VRQ DESBLOQUEADO" << std::endl;
+		}
 		if ((finish - WAIT_OBJECT_0) == 0) {
 			break;
 		}
