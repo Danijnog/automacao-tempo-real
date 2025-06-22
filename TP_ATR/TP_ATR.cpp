@@ -468,9 +468,7 @@ DWORD WINAPI generate_remote_message(LPVOID) {
 		}
 
 		int time_ms = (rand() % 1901) + 100; // Gera um número aleatório entre 100 e 2000
-		//status = WaitForSingleObject(hEvent, time_ms); // Aguarda o timeout para gerar a próxima mensagem (entre 100 e 2000 ms)
-		status = WaitForSingleObject(hEvent, 100); // Aguarda o timeout para gerar a próxima mensagem (entre 100 e 2000 ms)
-
+		status = WaitForSingleObject(hEvent, time_ms); // Aguarda o timeout para gerar a próxima mensagem (entre 100 e 2000 ms)
 
 		if (status == WAIT_TIMEOUT) {
 			// NSEQ
@@ -1015,9 +1013,5 @@ int main() {
 
 	return EXIT_SUCCESS;
 }
-
-
-
-
 
 
